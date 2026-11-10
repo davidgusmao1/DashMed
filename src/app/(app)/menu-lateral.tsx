@@ -108,8 +108,10 @@ export default function MenuLateral({ nome, email, plataforma, clientes, emFoco 
         <div className={`border-t border-zinc-100 py-4 ${aberto ? "space-y-1 px-5" : "px-2 text-center"}`}>
           {aberto ? (
             <>
-              <div className="truncate text-xs font-medium text-zinc-700" title={email}>{nome}</div>
-              <div className="truncate text-[11px] text-zinc-400">{email}</div>
+              <Link href="/conta" title="Minha conta" className="block rounded-md hover:bg-zinc-50">
+                <div className="truncate text-xs font-medium text-zinc-700">{nome}</div>
+                <div className="truncate text-[11px] text-zinc-400">{email}</div>
+              </Link>
               <button onClick={sair} className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900">
                 <LogOut size={13} /> Sair
               </button>
