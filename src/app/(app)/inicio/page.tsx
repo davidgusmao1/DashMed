@@ -14,6 +14,9 @@ export default async function Inicio() {
       <div>
         <h1 className="text-2xl font-bold">Olá, {eu.nome.split(" ")[0]}</h1>
         <p className="text-sm text-zinc-500">{emFoco ? `Cliente: ${emFoco.nome}` : "Nenhum cliente cadastrado"}</p>
+        {/* Marca de teste da publicação a cada push (David, 10/11/26: "escrevendo
+            teste2 na tela principal"). Sai quando o teste acabar. */}
+        <p className="mt-2 text-sm font-semibold text-teal-700">teste2</p>
       </div>
       <div className="cartao max-w-md p-5">
         <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">Plataforma</div>
