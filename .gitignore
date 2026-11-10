@@ -14,3 +14,4 @@ supabase/.temp
 *.tsbuildinfo
 __pycache__/
 api-chave-*.txt
+.env*
