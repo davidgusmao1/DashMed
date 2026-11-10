@@ -1,0 +1,16 @@
+# segredos e ambiente local — nunca versionar
+.env
+.env*.local
+.vercel
+node_modules
+.next
+out
+.DS_Store
+*.log
+
+# senhas iniciais — nunca versionar
+acessos-iniciais.txt
+supabase/.temp
+*.tsbuildinfo
+__pycache__/
+api-chave-*.txt

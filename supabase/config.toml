@@ -1,0 +1,4 @@
+project_id = "yjwhhkzqmsouvnryiwde"
+
+[functions.saude]
+verify_jwt = true
