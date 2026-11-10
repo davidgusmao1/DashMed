@@ -184,10 +184,10 @@ npm run build          # o mesmo build da Vercel
 - **Idioma:** textos da interface em português do Brasil, com o tom da equipe.
 
 ### 6.5 Publicar
-- **Front:** `npx vercel deploy --prod` na pasta do projeto, logado numa conta do time "David's projects".
-- **Para publicar a cada push (recomendado):** o David instala o app da Vercel no GitHub dele, liberando o repositório DashMed. Depois, em Vercel → dashmed-app → Settings → Git, conecta o `davidgusmao1/DashMed`. A partir daí:
+- **Front: publica a cada push.** A Vercel está ligada ao `davidgusmao1/DashMed` desde 10/11/26 (app da Vercel instalado no GitHub do David, só neste repositório):
   - push na `main` vai para produção;
   - pull request ganha URL de preview.
+- **Publicar à mão** (só se o push não servir): `npx vercel deploy --prod` na pasta do projeto, logado numa conta do time "David's projects".
 - **Commits:** precisam sair com um e-mail que seja membro do time da Vercel, senão a Vercel bloqueia o deploy ("commit author email … not valid").
 - **Banco e funções:** pelo CLI do Supabase (6.2 e 6.3). A Vercel não publica isso.
 
@@ -233,16 +233,16 @@ Feito e no ar:
 - [x] Menu da esquerda (recolhe, e vira barra no celular), seletor de cliente para a plataforma.
 - [x] Edge function `saude` + card "Banco e funções no ar" no Início.
 - [x] Produção em https://dashmed-app.vercel.app.
+- [x] Vercel ligada ao GitHub (6.5): push na `main` publica, PR ganha preview (10/11/26).
 
 Sugestão de ordem:
-1. **Ligar a Vercel ao GitHub** (6.5), para publicar a cada push e ter preview por PR.
-2. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3).
-3. **Usuários:** edge `usuarios` + tela (criar, desativar, papel), só para admin e plataforma.
-4. **Clientes:** tela só da plataforma (criar e editar cliente; soft delete).
-5. **Auditoria:** tabela `logs` (quem, o quê, quando, cliente) gravada por gatilho nas tabelas de negócio.
-6. **Vigia** (regra 5) assim que houver a primeira invariante.
-7. Ambiente de **homologação** (um segundo projeto Supabase ou branch) antes de dado real de paciente.
-8. Os itens do menu da DashMed em si, combinados com o David.
+1. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3).
+2. **Usuários:** edge `usuarios` + tela (criar, desativar, papel), só para admin e plataforma.
+3. **Clientes:** tela só da plataforma (criar e editar cliente; soft delete).
+4. **Auditoria:** tabela `logs` (quem, o quê, quando, cliente) gravada por gatilho nas tabelas de negócio.
+5. **Vigia** (regra 5) assim que houver a primeira invariante.
+6. Ambiente de **homologação** (um segundo projeto Supabase ou branch) antes de dado real de paciente.
+7. Os itens do menu da DashMed em si, combinados com o David.
 
 Se o produto for lidar com **dados de saúde**, a LGPD trata isso como dado sensível. Desenhe isso desde já:
 - acesso mínimo pela RLS;
