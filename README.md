@@ -14,3 +14,5 @@ src/app/(app)         telas logadas (layout com o menu da esquerda)
 ```
 
 Projeto Supabase `yjwhhkzqmsouvnryiwde` (São Paulo).
+
+> **Handoff completo:** veja [`HANDOFF.md`](HANDOFF.md). Regras de engenharia: [`AGENTS.md`](AGENTS.md).
