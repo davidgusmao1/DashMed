@@ -238,6 +238,7 @@ Feito e no ar:
 - [x] **Conteúdos para mídias sociais** e **Configurações** (10/11/26) — ver 8.1.
 - [x] **Vigia** (regra 5): função SQL `vigiar()` rodando no pg_cron a cada 10 min (`dashmed-vigia`), achados na tabela `achados`.
 - [x] **Agenda** (10/11/26): terapias para renovar e quem precisa ser chamado, com importação da planilha de indicações — ver 8.2.
+- [x] **CRM de resgate** em Kanban (11/11/26), com a lista de 2025 do Apolo importada (559 pacientes, 803 terapias) — ver 8.3.
 - [x] Funções da Vercel em **gru1** (São Paulo), junto do banco (`vercel.json`): dado de paciente processado no Brasil e menos latência.
 
 Sugestão de ordem:
@@ -273,6 +274,18 @@ Pedido do David (10/11/26): "um menu na esquerda que vamos chamar de agenda onde
 - **Limitação conhecida:** sem CPF/id na planilha, dois pacientes homônimos viram um só na importação.
 - **Próximo passo:** a chamada vai pelo sistema do parceiro **Prospekt** (a API ainda vai ser passada). A Agenda já separa quem chamar; falta mandar a lista e receber o resultado de cada contato.
 - Teste: `npx supabase db query --remote --file supabase/tests/agenda.sql` (transação desfeita; 20 checagens de RLS e importação).
+- Desde a 0004, "A chamar" da Agenda = terapias **com vencimento** em etapa de contato ou já realizadas (renovação). Sem vencimento, o lugar é o CRM (8.3).
+
+### 8.3 CRM de resgate (Kanban)
+Pedido do David (11/11/26): "organizar um CRM estilo kanban para que minhas secretárias entrem em contato com os pacientes que ainda não fizeram cirurgias ... resgatar pacientes que tiveram um tratamento indicado e não realizaram".
+
+- **Tela** `/crm`: uma coluna por etapa da terapia (`situacao`: `a_chamar` "A contatar", `tentativa`, `em_conversa`, `agendado`, `realizado`, `nao_renovar` "Não vai fazer"). Abre filtrado nas cirurgias (`ehCirurgia` em `src/lib/crm.ts`: ATQ/MAKO, VAQ, prótese…). Arrasta no computador; no celular move pelo registro da ligação. 60 cartões por coluna, com o total e aviso quando há mais.
+- **Ligações** (`contatos`, 0004): resultado + anotação, via `registrar_contato` (uma transação: grava a ligação, move a etapa, marca "ligar de novo em"). É histórico: sem update nem delete. O resumo na terapia (`contatos_qtd`, `ultimo_contato_em`, `ultimo_resultado`) é escrito por gatilho. Responsável por cartão (`responsavel_id`).
+- **Importação v2/v3** lê a planilha do Apolo Ninsaúde (`indicacoes-2025-apolo.xlsx`: abas Indicações e Candidatos; categoria "ATQ/MAKO, AH" vira duas terapias; celular principal + todos os números; e-mail; nascimento, que entra na chave do paciente e separa homônimos; candidatos marcados; "AH aplicado no dia" = Realizado). Prazo opcional: sem prazo, a terapia fica sem vencimento.
+- **Etapa automática** (0005): enquanto ninguém mexeu no cartão (`situacao_auto` e nenhuma ligação), a etapa segue a consulta mais nova da planilha. Arrastar, ligar ou mudar na ficha desliga isso: a importação não muda mais aquela etapa. O gatilho sabe que é importação pela variável de transação `dashmed.importando`.
+- **Estado em 11/11/26:** lista de 2025 importada com AH = 6 meses; AH 126 Realizado / 205 A contatar; ATQ/MAKO 227 e VAQ 28 a contatar; 63 terapias de candidatos marcadas para revisar.
+- **Falta:** contas das secretárias (não há tela de Usuários; o e-mail padrão do Supabase só entrega para membros da organização — ver 5.3) e a integração com o Prospekt para as ligações.
+- Teste: `npx supabase db query --remote --file supabase/tests/crm.sql` (transação desfeita; 24 checagens).
 
 Se o produto for lidar com **dados de saúde**, a LGPD trata isso como dado sensível. Desenhe isso desde já:
 - acesso mínimo pela RLS;
