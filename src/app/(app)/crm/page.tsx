@@ -39,10 +39,18 @@ export default async function Crm({ searchParams }: { searchParams: Promise<{ [k
   // banco, estoura a inferência do TypeScript dentro de funções; daí o tipo solto.
   type Consulta = ReturnType<ReturnType<typeof supabase.from>["select"]>;
   const campos = `id, procedimento, ultima_indicacao_em, revisar, revisar_motivo, situacao, retornar_em, contatos_qtd,
-    ultimo_contato_em, ultimo_resultado, responsavel_id, pacientes${busca ? "!inner" : ""}(nome, telefone)`;
+    ultimo_contato_em, ultimo_resultado, responsavel_id, vence_em, ultima_realizacao_em, lado_pendente,
+    pacientes${busca ? "!inner" : ""}(nome, telefone)`;
+  const hoje = hojeSP();
   const coluna = (etapa: Etapa) => {
     let q = (supabase.from("terapias").select(campos, { count: "exact" }) as unknown as Consulta)
-      .eq("cliente_id", emFoco.id).is("deleted_at", null).eq("situacao", etapa);
+      .eq("cliente_id", emFoco.id).is("deleted_at", null);
+    // AH já aplicado volta sozinho para "A contatar" quando passa do prazo de
+    // renovação (David, 11/11/26: "passou de 6 meses, ele é candidato a ser
+    // chamado novamente") — sem cron: a coluna lê o vencimento
+    if (etapa === "a_chamar") q = q.or(`situacao.eq.a_chamar,and(situacao.eq.realizado,vence_em.lte.${hoje})`);
+    else if (etapa === "realizado") q = q.eq("situacao", "realizado").or(`vence_em.is.null,vence_em.gt.${hoje}`);
+    else q = q.eq("situacao", etapa);
     if (filtro) q = q.in("procedimento", filtro.length ? filtro : ["—"]);
     if (busca) q = q.ilike("pacientes.nome", `%${busca}%`);
     if (meus) q = q.eq("responsavel_id", eu.id);
@@ -113,7 +121,7 @@ export default async function Crm({ searchParams }: { searchParams: Promise<{ [k
             <Link href={link({ resp: meus ? "" : "meus" })} className={chip(meus)}>Só os meus</Link>
             {busca && <Link href={link({ q: "" })} className="text-xs text-zinc-500 underline">limpar busca</Link>}
           </div>
-          <Quadro colunas={colunas} usuarios={(usuarios ?? []) as { id: string; nome: string }[]} hoje={hojeSP()} />
+          <Quadro colunas={colunas} usuarios={(usuarios ?? []) as { id: string; nome: string }[]} hoje={hoje} />
         </>
       )}
     </div>

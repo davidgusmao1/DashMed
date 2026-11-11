@@ -19,6 +19,7 @@ const CAMPOS: Record<string, string> = {
   responsavel_id: "responsável", contatos_qtd: "ligações", ultimo_contato_em: "última ligação", ultimo_resultado: "resultado",
   ultima_indicacao_em: "última indicação", nome: "nome", observacoes: "observações", nota: "nota", deleted_at: "remoção",
   email: "e-mail", nascimento: "nascimento", telefones: "telefones", chave_importacao: "chave da planilha",
+  ultima_realizacao_em: "última realização", lado_pendente: "lado pendente", situacao_auto: "etapa automática",
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,6 +27,7 @@ type Terapia = {
   id: string; cliente_id: string; procedimento: string; ultima_indicacao_em: string | null; vence_em: string | null;
   vence_em_manual: boolean; revisar: boolean; revisar_motivo: string | null; situacao: string; situacao_em: string;
   situacao_por: string | null; retornar_em: string | null; responsavel_id: string | null;
+  ultima_realizacao_em: string | null; lado_pendente: boolean;
   pacientes: { id: string; nome: string; telefone: string | null; telefones: string | null; email: string | null; nascimento: string | null } | null;
 };
 
@@ -45,14 +47,15 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
   const supabase = await supabaseServidor();
   const { data, error } = await supabase.from("terapias")
     .select(`id, cliente_id, procedimento, ultima_indicacao_em, vence_em, vence_em_manual, revisar, revisar_motivo, situacao,
-             situacao_em, situacao_por, retornar_em, responsavel_id, pacientes(id, nome, telefone, telefones, email, nascimento)`)
+             situacao_em, situacao_por, retornar_em, responsavel_id, ultima_realizacao_em, lado_pendente,
+             pacientes(id, nome, telefone, telefones, email, nascimento)`)
     .eq("id", id).maybeSingle();
   if (error) return <p className="text-sm">Não consegui abrir a terapia: {error.message}</p>;
   if (!data) notFound();
   const t = data as unknown as Terapia;
   const pac = t.pacientes;
 
-  const [indicacoes, outras, contatos, historico, equipe] = await Promise.all([
+  const [indicacoes, outras, contatos, historico, equipe, realizacoes] = await Promise.all([
     supabase.from("indicacoes").select("id, indicada_em, horario, tipo_atendimento, procedimento_original, nota, impressos, observacao")
       .eq("terapia_id", id).is("deleted_at", null).order("indicada_em", { ascending: false }),
     pac ? supabase.from("terapias").select("id, procedimento, vence_em, situacao")
@@ -62,6 +65,9 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
     supabase.from("auditoria").select("id, em, acao, tabela, campos, usuario_id")
       .in("registro_id", pac ? [id, pac.id] : [id]).order("em", { ascending: false }).limit(15),
     supabase.from("usuarios").select("id, nome").eq("cliente_id", t.cliente_id).eq("ativo", true).is("deleted_at", null).order("nome"),
+    // o que o paciente já fez, de qualquer procedimento (lista de realizados, 11/11/26)
+    pac ? supabase.from("realizacoes").select("id, procedimento, descricao, lado, articulacao, realizada_em")
+      .eq("paciente_id", pac.id).is("deleted_at", null).order("realizada_em", { ascending: false }) : Promise.resolve({ data: [], error: null }),
   ]);
   const ids = [...new Set([t.situacao_por, ...(contatos.data ?? []).map((c) => c.feito_por), ...(historico.data ?? []).map((h) => h.usuario_id)]
     .filter(Boolean))] as string[];
@@ -85,6 +91,12 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
           {pac?.nascimento && <> · {idade(pac.nascimento, hoje)} (nasc. {dataBR(pac.nascimento)})</>}
         </p>
       </div>
+
+      {t.lado_pendente && (
+        <div className="cartao border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <b>Falta o outro lado.</b> A indicação é bilateral e só um lado aparece como feito na lista de realizados.
+        </div>
+      )}
 
       {t.revisar && (
         <div className="cartao space-y-3 border-zinc-300 p-5">
@@ -146,6 +158,23 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
           ))}
         </ul>
       </div>
+
+      {(realizacoes.data?.length ?? 0) > 0 && (
+        <div className="cartao p-5">
+          <div className={`${rotulo} mb-3`}>Procedimentos realizados ({realizacoes.data?.length})</div>
+          <ul className="space-y-1.5 text-sm">
+            {(realizacoes.data ?? []).map((r) => (
+              <li key={r.id}>
+                <span className="font-medium">{dataBR(r.realizada_em)}</span> · {r.procedimento}
+                <span className="text-zinc-500">{[r.descricao, r.lado, r.articulacao].filter(Boolean).map((x) => ` · ${x}`).join("")}</span>
+              </li>
+            ))}
+          </ul>
+          {t.ultima_realizacao_em && t.vence_em && t.procedimento.toUpperCase().includes("AH") && (
+            <p className="mt-2 text-xs text-zinc-500">Última aplicação em {dataBR(t.ultima_realizacao_em)}: renovar em {dataBR(t.vence_em)}.</p>
+          )}
+        </div>
+      )}
 
       <div className="cartao p-5">
         <div className={`${rotulo} mb-3`}>Indicações ({indicacoes.data?.length ?? 0})</div>

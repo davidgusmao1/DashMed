@@ -193,7 +193,7 @@ function lerCsv(bytes: Uint8Array): unknown[][] {
   return linhas;
 }
 
-type Aba = { nome: string; tabela: unknown[][] };
+export type Aba = { nome: string; tabela: unknown[][] };
 
 function acharCabecalho(tabela: unknown[][]): number {
   return tabela.slice(0, 5).findIndex((l) => l.some((c) => typeof c === "string" && TITULOS[0][1](tituloNormal(c))));
@@ -262,9 +262,8 @@ function lerAba(aba: Aba, linhas: LinhaImportacao[], erros: ErroLinha[], colunas
   });
 }
 
-/** Lê o arquivo (.xlsx ou .csv), acha as colunas pelo título em cada aba com
- *  a coluna "Paciente" e valida cada linha. */
-export async function lerPlanilha(arquivo: File): Promise<Leitura> {
+/** Abre o arquivo (.xlsx ou .csv) e devolve as abas que têm a coluna "Paciente". */
+export async function abrirPlanilha(arquivo: File): Promise<Aba[]> {
   const nome = arquivo.name.toLowerCase();
   let abas: Aba[];
   if (nome.endsWith(".csv")) {
@@ -284,7 +283,15 @@ export async function lerPlanilha(arquivo: File): Promise<Leitura> {
   if (!abas.length) throw new Error('Não achei a coluna "Paciente" nas primeiras linhas de nenhuma aba.');
   const total = abas.reduce((n, a) => n + a.tabela.length, 0);
   if (total > MAX_LINHAS) throw new Error(`A planilha tem ${total} linhas; o limite por importação é ${MAX_LINHAS}. Divida o arquivo.`);
+  return abas;
+}
 
+/** Lê o arquivo de indicações: acha as colunas pelo título em cada aba e valida cada linha. */
+export async function lerPlanilha(arquivo: File): Promise<Leitura> {
+  return lerIndicacoes(await abrirPlanilha(arquivo));
+}
+
+export function lerIndicacoes(abas: Aba[]): Leitura {
   const linhas: LinhaImportacao[] = [];
   const erros: ErroLinha[] = [];
   const colunas = new Map<string, string>();
@@ -333,3 +340,150 @@ export function resumir(l: Leitura) {
   };
 }
 export type Resumo = ReturnType<typeof resumir>;
+
+// ── lista de procedimentos JÁ REALIZADOS ────────────────────────────────
+// David, 11/11/26 ("2025_2026 - ATQ, ATJ, AH, VISCO, PRP e Hidrogel.xlsx"): Ano,
+// Data de Realização, Paciente, Procedimento em texto livre ("AH quadril
+// bilateral", "ATQ Unimed", "Visco BMAC", "Hidrogel Primeira"…) e, numa coluna
+// sem título, uma lista à parte de BMAC no formato "nome – dd/mm/aaaa – BMAC".
+// Não tem nascimento nem telefone: o casamento com o CRM é pelo nome.
+
+export type Realizado = {
+  linha: number;
+  paciente: string;
+  chave_nome: string;
+  data: string;
+  /** família: AH, Hidrogel, PRP, BMAC, ATQ, ATJ, VAQ (bate com o check de realizacoes) */
+  procedimento: string;
+  descricao: string;
+  lado: "unilateral" | "bilateral" | null;
+  articulacao: string | null;
+};
+
+export type LeituraRealizados = {
+  colunas: { campo: string; titulo: string }[];
+  abas: string[];
+  linhas: Realizado[];
+  erros: ErroLinha[];
+  daColunaExtra: number;
+};
+
+const TITULO_REALIZACAO = (t: string) =>
+  ["data de realizacao", "data da realizacao", "data realizacao", "realizado em", "realizada em",
+    "data do procedimento", "data da cirurgia", "data da aplicacao"].includes(t);
+
+/** A lista tem coluna de data de realização? Então é de realizados, não de indicações. */
+export function ehListaDeRealizados(abas: Aba[]): boolean {
+  return abas.some((a) => {
+    const i = acharCabecalho(a.tabela);
+    return i >= 0 && a.tabela[i].some((c) => typeof c === "string" && TITULO_REALIZACAO(tituloNormal(c)));
+  });
+}
+
+/** Famílias de um procedimento em texto livre. "Visco" (viscossuplementação) é
+ *  ácido hialurônico; "Visco BMAC" = AH + BMAC; "AH e Hidrogel" = os dois. */
+export function familiasDe(texto: string): string[] {
+  const t = tituloNormal(texto);
+  const f = new Set<string>();
+  if (/\b(atq|mako)\b|protese de quadril|artroplastia (total )?de quadril/.test(t)) f.add("ATQ");
+  if (/\batj\b|protese de joelho|artroplastia (total )?de joelho/.test(t)) f.add("ATJ");
+  if (/\bvaq\b|artroscop|video/.test(t)) f.add("VAQ");
+  if (/hidrogel|hymovis/.test(t)) f.add("Hidrogel");
+  if (/bmac|bamc|\bviscob\b/.test(t)) f.add("BMAC");
+  if (/\bprp\b/.test(t)) f.add("PRP");
+  if (/\bah\b|hialuron|visco/.test(t)) f.add("AH");
+  return [...f];
+}
+
+export function ladoDe(texto: string): "unilateral" | "bilateral" | null {
+  const t = tituloNormal(texto);
+  if (/bilateral|\bjoelhos\b|\bquadris\b|\bambos\b|\bambas\b/.test(t)) return "bilateral";
+  if (/unilateral/.test(t)) return "unilateral";
+  return null;
+}
+
+export function articulacaoDe(texto: string): string | null {
+  const t = tituloNormal(texto);
+  const q = /quadri/.test(t), j = /joelh/.test(t);
+  return q && j ? "quadril e joelho" : q ? "quadril" : j ? "joelho" : null;
+}
+
+// "Maria da Silva – 06/01/2025 – Visco BMAC"
+const ENTRADA_EXTRA = /^(.+?)\s+[–—-]\s+(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:[–—-]\s*(.+))?$/;
+
+export function lerRealizados(abas: Aba[]): LeituraRealizados {
+  const linhas: Realizado[] = [];
+  const erros: ErroLinha[] = [];
+  const colunas = new Map<string, string>();
+  let daColunaExtra = 0;
+  const empurrar = (linha: number, paciente: string, data: string, descricao: string) => {
+    for (const f of familiasDe(descricao)) {
+      linhas.push({
+        linha, paciente, chave_nome: chaveDoNome(paciente), data, procedimento: f, descricao,
+        lado: ladoDe(descricao), articulacao: articulacaoDe(descricao),
+      });
+    }
+  };
+  for (const aba of abas) {
+    const iCab = acharCabecalho(aba.tabela);
+    if (iCab < 0) continue;
+    const cab = aba.tabela[iCab].map((c) => (c === null || c === undefined ? "" : String(c)));
+    const achar = (bate: (t: string) => boolean) => cab.findIndex((t) => bate(tituloNormal(t)));
+    const iPac = achar(TITULOS[0][1]);
+    let iData = achar(TITULO_REALIZACAO);
+    if (iData < 0) iData = achar((t) => t === "data");
+    const iProc = achar((t) => ["procedimento", "terapia", "tratamento", "cirurgia"].includes(t));
+    if (iPac < 0 || iData < 0 || iProc < 0) {
+      throw new Error(`Na aba "${aba.nome}" faltam colunas: ${[iPac < 0 && "Paciente", iData < 0 && "Data de Realização", iProc < 0 && "Procedimento"].filter(Boolean).join(", ")}.`);
+    }
+    colunas.set("Paciente", cab[iPac]); colunas.set("Data", cab[iData]); colunas.set("Procedimento", cab[iProc]);
+    const sufixo = aba.nome ? ` (aba ${aba.nome})` : "";
+    aba.tabela.slice(iCab + 1).forEach((l, k) => {
+      const linha = iCab + k + 2;
+      if (l.every((c) => c === null || c === undefined || String(c).trim() === "")) return;
+      // lista à parte em outra coluna (ex.: BMAC): vale por si, mesmo se a linha principal estiver vazia
+      l.forEach((c, j) => {
+        if (j === iPac || j === iData || j === iProc || typeof c !== "string") return;
+        const m = c.trim().match(ENTRADA_EXTRA);
+        if (!m) return;
+        const data = lerData(m[2]);
+        const desc = (m[3] ?? "").trim();
+        if (!data || !desc || !familiasDe(desc).length) return void erros.push({ linha, motivo: `anotação ao lado não entendida${sufixo}` });
+        daColunaExtra++;
+        empurrar(linha, m[1].replace(/\s+/g, " ").trim(), data, desc);
+      });
+      const paciente = texto(l[iPac]);
+      const data = lerData(l[iData]);
+      const descricao = texto(l[iProc]);
+      if (!paciente && !descricao) return;
+      if (!paciente) return void erros.push({ linha, motivo: `sem nome de paciente${sufixo}` });
+      if (!data) return void erros.push({ linha, motivo: `data de realização inválida ou vazia${sufixo}` });
+      if (!descricao) return void erros.push({ linha, motivo: `sem procedimento${sufixo}` });
+      if (!familiasDe(descricao).length) return void erros.push({ linha, motivo: `procedimento não reconhecido: "${descricao.slice(0, 60)}"` });
+      empurrar(linha, paciente, data, descricao);
+    });
+  }
+  linhas.sort((a, b) => a.data.localeCompare(b.data) || a.linha - b.linha);
+  return {
+    colunas: [...colunas].map(([campo, titulo]) => ({ campo, titulo })),
+    abas: abas.map((a) => a.nome),
+    linhas, erros, daColunaExtra,
+  };
+}
+
+export function resumirRealizados(l: LeituraRealizados) {
+  const porFamilia = new Map<string, number>();
+  for (const x of l.linhas) porFamilia.set(x.procedimento, (porFamilia.get(x.procedimento) ?? 0) + 1);
+  return {
+    colunas: l.colunas,
+    abas: l.abas,
+    linhas: l.linhas.length,
+    pacientes: new Set(l.linhas.map((x) => x.chave_nome)).size,
+    porFamilia: [...porFamilia].sort((a, b) => b[1] - a[1]).map(([nome, n]) => ({ nome, n })),
+    bilaterais: l.linhas.filter((x) => x.lado === "bilateral").length,
+    unilaterais: l.linhas.filter((x) => x.lado === "unilateral").length,
+    daColunaExtra: l.daColunaExtra,
+    erros: l.erros,
+  };
+}
+export type ResumoRealizados = ReturnType<typeof resumirRealizados>;

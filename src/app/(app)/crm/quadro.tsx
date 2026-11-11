@@ -25,6 +25,9 @@ export type Cartao = {
   ultimo_contato_em: string | null;
   ultimo_resultado: string | null;
   responsavel_id: string | null;
+  vence_em: string | null;
+  ultima_realizacao_em: string | null;
+  lado_pendente: boolean;
   pacientes: { nome: string; telefone: string | null } | null;
 };
 export type Coluna = { etapa: Etapa; total: number; cartoes: Cartao[] };
@@ -53,7 +56,9 @@ export default function Quadro({ colunas, usuarios, hoje }: {
   const [, iniciar] = useTransition();
 
   const todos = colunas.flatMap((c) => c.cartoes);
-  const etapaDe = (c: Cartao) => movidos[c.id] ?? c.situacao;
+  // realizado com o prazo de renovação vencido aparece em "A contatar" (mesma regra da página)
+  const renovacao = (c: Cartao) => c.situacao === "realizado" && !!c.vence_em && c.vence_em <= hoje;
+  const etapaDe = (c: Cartao): Etapa => movidos[c.id] ?? (renovacao(c) ? "a_chamar" : c.situacao);
   const nomeDe = (id: string | null) => usuarios.find((u) => u.id === id)?.nome ?? null;
 
   function mover(id: string, etapa: Etapa) {
@@ -113,7 +118,10 @@ export default function Quadro({ colunas, usuarios, hoje }: {
                           {c.contatos_qtd} {c.contatos_qtd === 1 ? "ligação" : "ligações"} · última: {ROTULO_RESULTADO[c.ultimo_resultado ?? ""] ?? "—"} ({instanteBR(c.ultimo_contato_em).slice(0, 5)})
                         </div>
                       )}
-                      {(c.retornar_em || c.revisar) && (
+                      {c.ultima_realizacao_em && (
+                        <div className="mt-1 text-xs text-teal-800">fez em {dataBR(c.ultima_realizacao_em)}{c.vence_em && c.procedimento.toUpperCase().includes("AH") ? ` · renovar em ${dataBR(c.vence_em)}` : ""}</div>
+                      )}
+                      {(c.retornar_em || c.revisar || c.lado_pendente || renovacao(c)) && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {c.retornar_em && (
                             <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${atrasado ? "bg-red-50 text-red-700" : "bg-zinc-100 text-zinc-700"}`}>
@@ -121,6 +129,8 @@ export default function Quadro({ colunas, usuarios, hoje }: {
                             </span>
                           )}
                           {c.revisar && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">{c.revisar_motivo ?? "revisar"}</span>}
+                          {renovacao(c) && <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[11px] font-medium text-teal-800">renovação</span>}
+                          {c.lado_pendente && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">falta o outro lado</span>}
                         </div>
                       )}
                     </article>
