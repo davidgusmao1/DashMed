@@ -170,11 +170,11 @@ npm run build          # o mesmo build da Vercel
   2. confere na tabela `usuarios` se a pessoa está ativa e tem o papel certo (plataforma ou admin daquele cliente);
   3. só então usa a chave de serviço;
   4. responde `{ erro: "motivo claro" }` com o status certo. Nunca falha calada.
-- **Próxima função a fazer:** `usuarios`. Ela vai:
-  - criar a conta no Auth com `email_confirm: true` e a linha em `usuarios`;
-  - desativar com `ban` no Auth e `ativo = false`, nunca `deleteUser`;
-  - trocar o papel.
-  É ela que vai abastecer a tela "Usuários".
+- **`usuarios`** (feita em 11/11/26) abastece a tela "Usuários" (`/usuarios`, só admin do cliente e plataforma):
+  - cria a conta no Auth com `email_confirm: true` e a linha em `usuarios`;
+  - gera o **link de primeiro acesso** (`generateLink` → `hashed_token` → `/auth/confirm` da DashMed → Minha conta para definir a senha). Vale 1 hora (`mailer_otp_exp`), uma vez. O admin do cliente só gera para quem nunca entrou; para quem já entrou, só a plataforma (o link entra na conta sem senha);
+  - desativa com `ban` no Auth e `ativo = false`, nunca `deleteUser` (a única exceção é desfazer uma conta recém-criada cujo cadastro falhou); reativa; troca o papel;
+  - ninguém mexe na própria conta, e conta da plataforma só a plataforma mexe. Regras em `_shared/regras-usuarios.ts`, teste `supabase/tests/usuarios.ts`. Toda ação vai para a `auditoria`.
 
 ### 6.4 Front
 - **Novo item no menu:** acrescente em `ITENS` (`src/app/(app)/menu-lateral.tsx`) e crie `src/app/(app)/<rota>/page.tsx`.
@@ -242,8 +242,8 @@ Feito e no ar:
 - [x] Funções da Vercel em **gru1** (São Paulo), junto do banco (`vercel.json`): dado de paciente processado no Brasil e menos latência.
 
 Sugestão de ordem:
-1. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3).
-2. **Usuários:** edge `usuarios` + tela (criar, desativar, papel), só para admin e plataforma.
+1. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3). Precisa de um domínio verificado no Resend; depois disso, convite e "esqueci a senha" podem sair por e-mail (hoje o primeiro acesso vai por link copiado/WhatsApp).
+2. ~~Usuários~~ — feito em 11/11/26 (6.3).
 3. **Clientes:** tela só da plataforma (criar e editar cliente; soft delete).
 4. **Auditoria:** a tabela `auditoria` (gatilho `auditar()`, 0003) já registra quem criou e mudou pacientes, terapias e indicações; falta ligar nas próximas tabelas de negócio e registrar quem **viu** dado de paciente.
 5. **Plano Pro do Supabase** antes de uso real: o Free pausa o projeto após 7 dias parado, limita a edge function a 150 s e arquivo a 50 MB.
