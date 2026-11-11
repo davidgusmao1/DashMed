@@ -15,7 +15,7 @@ export default async function Importar() {
 
   const supabase = await supabaseServidor();
   const { data: importacoes, error } = await supabase.from("importacoes")
-    .select("id, arquivo, linhas, pacientes_novos, terapias_novas, indicacoes_novas, ja_existiam, com_erro, erros, feita_em, concluida_em")
+    .select("id, arquivo, tipo, resumo, linhas, pacientes_novos, terapias_novas, indicacoes_novas, ja_existiam, com_erro, erros, feita_em, concluida_em")
     .eq("cliente_id", emFoco.id).order("feita_em", { ascending: false }).limit(20);
 
   return (
@@ -42,14 +42,18 @@ export default async function Importar() {
                 <span className="text-xs text-zinc-500">{instanteBR(i.feita_em)}</span>
               </div>
               <div className="text-xs text-zinc-600">
-                {i.concluida_em
-                  ? `${i.linhas} linhas · ${i.pacientes_novos} pacientes novos · ${i.terapias_novas} terapias novas · ${i.indicacoes_novas} indicações novas · ${i.ja_existiam} já existiam · ${i.com_erro} com erro`
-                  : "Interrompida: nada desta importação foi gravado."}
+                {!i.concluida_em
+                  ? "Interrompida: nada desta importação foi gravado."
+                  : i.tipo === "realizados" && i.resumo
+                    // lista de realizados: os números que importam são outros, e
+                    // "fora do CRM" não é erro (David, 11/11/26: só os "pacientes que nós já temos")
+                    ? `Lista de realizados · ${i.linhas} linhas · ${i.resumo.realizacoes_novas} realizações novas · ${i.resumo.pacientes_encontrados} pacientes no CRM · ${i.resumo.sem_paciente} fora do CRM · ${i.resumo.cirurgias_concluidas} cirurgias concluídas · ${i.resumo.ah_com_data} AH com data (${i.resumo.ah_vencidos} para renovar) · ${i.resumo.lado_pendente} com lado pendente`
+                    : `${i.linhas} linhas · ${i.pacientes_novos} pacientes novos · ${i.terapias_novas} terapias novas · ${i.indicacoes_novas} indicações novas · ${i.ja_existiam} já existiam · ${i.com_erro} com erro`}
               </div>
               {Array.isArray(i.erros) && i.erros.length > 0 && (
                 <details className="text-xs text-zinc-600">
-                  <summary className="cursor-pointer">linhas com erro</summary>
-                  {(i.erros as { linha: number; motivo: string }[]).slice(0, 50).map((e) => <div key={e.linha}>linha {e.linha}: {e.motivo}</div>)}
+                  <summary className="cursor-pointer">{i.tipo === "realizados" ? "linhas fora do CRM ou não lidas" : "linhas com erro"}</summary>
+                  {(i.erros as { linha: number; motivo: string }[]).slice(0, 120).map((e, k) => <div key={`${e.linha}-${k}`}>linha {e.linha}: {e.motivo}</div>)}
                 </details>
               )}
             </li>
