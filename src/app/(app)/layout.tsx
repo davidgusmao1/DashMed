@@ -10,7 +10,8 @@ export default async function LayoutDoApp({ children }: { children: React.ReactN
   const { clientes, emFoco } = await clientesDe(eu);
   return (
     <div className="flex min-h-screen max-md:flex-col">
-      <MenuLateral nome={eu.nome} email={eu.email} plataforma={eu.plataforma} clientes={clientes} emFoco={emFoco} />
+      <MenuLateral nome={eu.nome} email={eu.email} plataforma={eu.plataforma}
+        admin={eu.plataforma || (eu.papel === "admin" && eu.cliente_id === emFoco?.id)} clientes={clientes} emFoco={emFoco} />
       <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
     </div>
   );

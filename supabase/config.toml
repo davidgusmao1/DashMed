@@ -24,3 +24,8 @@ verify_jwt = true
 
 [functions.heygen-retorno]
 verify_jwt = false
+
+# Contas (11/11/26): criar, link de primeiro acesso, papel, desativar/reativar.
+# Exige a sessão de quem pede; a função confere se é admin do cliente ou da plataforma.
+[functions.usuarios]
+verify_jwt = true
