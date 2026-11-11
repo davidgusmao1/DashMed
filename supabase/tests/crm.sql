@@ -107,6 +107,39 @@ begin
   insert into resultado values (13, 'resumo do quadro conta por procedimento e etapa', v >= 1, v::text);
 end $$;
 
+-- 0005: a etapa automática segue a consulta mais nova, até uma pessoa mexer
+do $$
+declare
+  c constant uuid := '9b765265-4625-43b0-8257-b2fd1de178ef';
+  linha_base constant jsonb := '{"paciente":"Paciente Teste Ordem","chave":"paciente teste ordem|1970-01-01","chave_nome":"paciente teste ordem","nascimento":"1970-01-01","procedimento":"AH","original":"AH","marca":null}';
+  t record;
+  ah uuid;
+begin
+  perform importar_planilha(c, 'ordem.xlsx', '{"AH": 6}', jsonb_build_array(
+    linha_base || '{"linha":2,"data":"2025-03-01","realizado":false}',
+    linha_base || '{"linha":3,"data":"2025-05-01","realizado":true}'));
+  select id, situacao, situacao_auto into t from terapias where paciente_id = (select id from pacientes where chave_importacao = 'paciente teste ordem|1970-01-01');
+  ah := t.id;
+  insert into resultado values (21, 'AH indicado e aplicado na consulta seguinte termina Realizado', t.situacao = 'realizado' and t.situacao_auto, row_to_json(t)::text);
+
+  -- a secretária registra uma ligação: dali em diante a importação não mexe
+  perform registrar_contato(ah, 'pediu_retorno', null, 'em_conversa', null);
+  perform importar_planilha(c, 'ordem2.xlsx', '{"AH": 6}', jsonb_build_array(
+    linha_base || '{"linha":2,"data":"2025-09-01","realizado":true}'));
+  select situacao, situacao_auto into t from terapias where id = ah;
+  insert into resultado values (22, 'depois de uma ligação, a importação não muda a etapa (humano ganha)', t.situacao = 'em_conversa' and not t.situacao_auto, row_to_json(t)::text);
+
+  -- arrastar o cartão também é coisa de pessoa
+  update terapias set situacao = 'agendado' where id = (select id from terapias where procedimento = 'Outra'
+    and paciente_id = (select id from pacientes where chave_importacao like 'paciente teste crm%'));
+  select situacao_auto into t from terapias where procedimento = 'Outra'
+    and paciente_id = (select id from pacientes where chave_importacao like 'paciente teste crm%');
+  insert into resultado values (23, 'arrastar o cartão marca a etapa como decidida por pessoa', not t.situacao_auto, row_to_json(t)::text);
+
+  insert into resultado values (24, 'a marca de importação não vaza para fora da importação',
+    coalesce(current_setting('dashmed.importando', true), '') = '', coalesce(current_setting('dashmed.importando', true), 'null'));
+end $$;
+
 -- ── como alguém de outro cliente ────────────────────────────────────────
 set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-0000000000b1","role":"authenticated"}';
 
@@ -155,7 +188,8 @@ do $$
 declare v int;
 begin
   select count(*) into v from auditoria where tabela = 'contatos' and usuario_id = '00000000-0000-4000-8000-0000000000a1';
-  insert into resultado values (19, 'auditoria registra as ligações e quem fez', v = 2, v::text);
+  -- 2 ligações no bloco do resgate + 1 no bloco da etapa automática (teste 22)
+  insert into resultado values (19, 'auditoria registra as ligações e quem fez', v = 3, v::text);
 end $$;
 
 -- placar e desfaz tudo (a mensagem de erro volta cortada perto de mil caracteres)
