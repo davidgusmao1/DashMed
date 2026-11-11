@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, House, LogOut, type LucideIcon } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, House, LogOut, Settings, type LucideIcon } from "lucide-react";
 import type { Cliente } from "@/lib/supabase/server";
 import { supabase } from "@/lib/supabase/client";
 import { escolherCliente } from "./acoes";
@@ -17,6 +17,10 @@ const ITENS: { href: string; label: string; icone: LucideIcon }[] = [
   // David, 10/11/26: "criar um menu na esquerda que vamos chamar de agenda
   // onde todos os pacientes que precisam renovar suas terapias precisam ser chamados"
   { href: "/agenda", label: "Agenda", icone: CalendarClock },
+  // David, 10/11/26: "no menu da esquerda criarmos um item que vai chamar
+  // conteúdos para mídias sociais"
+  { href: "/conteudos", label: "Conteúdos", icone: Clapperboard },
+  { href: "/configuracoes", label: "Configurações", icone: Settings },
 ];
 const CHAVE = "menu-lateral-aberto";
 

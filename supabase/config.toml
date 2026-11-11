@@ -2,3 +2,25 @@ project_id = "yjwhhkzqmsouvnryiwde"
 
 [functions.saude]
 verify_jwt = true
+
+# Conteúdos para mídias sociais (10/11/26). Todas exigem a sessão do usuário,
+# com duas exceções que se conferem sozinhas:
+# - conteudos-roteiro: cada passo chama o seguinte com a chave de serviço; a
+#   função valida a sessão (auth.getUser) ou a chave de serviço (tempo
+#   constante) em toda chamada, sem depender do formato da chave no gateway;
+# - heygen-retorno: quem chama é a HeyGen; a função confere um token por vídeo
+#   e o estado na API da HeyGen.
+[functions.integracoes]
+verify_jwt = true
+
+[functions.conteudos-pesquisa]
+verify_jwt = true
+
+[functions.conteudos-roteiro]
+verify_jwt = false
+
+[functions.conteudos-video]
+verify_jwt = true
+
+[functions.heygen-retorno]
+verify_jwt = false

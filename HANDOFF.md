@@ -149,13 +149,14 @@ npm run build          # o mesmo build da Vercel
 
 ### 6.2 Banco: migrações
 - Toda mudança de esquema vira um arquivo novo `supabase/migrations/NNNN_nome.sql` em sequência (`0002_...`, `0003_...`). Nunca edite uma migração já aplicada.
-- A `0001_inicio.sql` foi aplicada direto pela API de gestão do Supabase. Antes do primeiro `supabase db push`, marque-a como aplicada:
+- A `0001_inicio.sql` foi aplicada direto pela API de gestão do Supabase e marcada como aplicada no histórico em 10/11/26 (`migration repair`). Da `0002` em diante, tudo vai por `db push`:
   ```bash
   npx supabase login
   npx supabase link --project-ref yjwhhkzqmsouvnryiwde
-  npx supabase migration repair --status applied 0001
-  npx supabase db push
+  npx supabase migration list --remote   # confira o que falta
+  npx supabase db push --remote
   ```
+- O CLI pede confirmação para mexer na produção; num agente, só com `--yes` depois de combinar.
 - O comentário no topo da migração diz **por que** ela existe (pedido, data, incidente). Isso é o histórico do projeto.
 
 ### 6.3 Edge functions
@@ -234,15 +235,32 @@ Feito e no ar:
 - [x] Edge function `saude` + card "Banco e funções no ar" no Início.
 - [x] Produção em https://dashmed-app.vercel.app.
 - [x] Vercel ligada ao GitHub (6.5): push na `main` publica, PR ganha preview (10/11/26).
+- [x] **Conteúdos para mídias sociais** e **Configurações** (10/11/26) — ver 8.1.
+- [x] **Vigia** (regra 5): função SQL `vigiar()` rodando no pg_cron a cada 10 min (`dashmed-vigia`), achados na tabela `achados`.
 
 Sugestão de ordem:
 1. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3).
 2. **Usuários:** edge `usuarios` + tela (criar, desativar, papel), só para admin e plataforma.
 3. **Clientes:** tela só da plataforma (criar e editar cliente; soft delete).
 4. **Auditoria:** tabela `logs` (quem, o quê, quando, cliente) gravada por gatilho nas tabelas de negócio.
-5. **Vigia** (regra 5) assim que houver a primeira invariante.
+5. **Plano Pro do Supabase** antes de uso real: o Free pausa o projeto após 7 dias parado, limita a edge function a 150 s e arquivo a 50 MB.
 6. Ambiente de **homologação** (um segundo projeto Supabase ou branch) antes de dado real de paciente.
-7. Os itens do menu da DashMed em si, combinados com o David.
+7. Os demais itens do menu da DashMed, combinados com o David.
+
+### 8.1 Conteúdos para mídias sociais
+Pedido do David (10/11/26): assunto → referências em publicações médicas → roteiro de ~15 min → vídeo com o avatar dele.
+
+| Passo | Onde | Como |
+|---|---|---|
+| Referências | edge `conteudos-pesquisa` (segundo plano) | Claude monta 2–4 buscas em inglês → **Europe PMC** (só PubMed, `SRC:MED`, com resumo; sem chave) → Claude dá relevância, nota e síntese. Só entra artigo que veio da busca (PMID real); PMID inventado é descartado (`soPmidsConhecidos`). O médico marca o que usa. |
+| Roteiro | edge `conteudos-roteiro` | Estrutura (6–8 blocos, 14–16 min) e depois **um bloco por execução**, cada passo chamando o seguinte (o relógio da edge é curto). Parou? A tela mostra "Continuar" e o vigia marca erro em 15 min. Bloco editado pelo médico não é sobrescrito sem confirmação. Regras do CFM 2.336/2023 no prompt. |
+| Vídeo | edge `conteudos-video` + `heygen-retorno` | HeyGen v3, `type: "studio"`: uma cena de avatar por trecho (≤ 4.800 caracteres; a HeyGen aceita 5.000 e 50 cenas). Só envia com "confirmo o custo" e `Idempotency-Key` = id do vídeo. O retorno da HeyGen só "cutuca": o estado é sempre lido em `GET /v3/videos/{id}`. Link do arquivo expira, então não é guardado. |
+| Chaves | edge `integracoes` + Vault | Chave testada com o provedor antes de guardar; valor no Vault (`dashmed:<cliente>:<provedor>`), lido só por `ler_segredo` (service_role). A tela vê os 4 últimos caracteres. |
+
+- Modelo: `claude-opus-5-5`, com `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) para recusa por engano em tema médico, e saída em JSON por esquema.
+- Testes: `deno run --allow-read supabase/tests/conteudos.ts` (regras de texto) e `supabase/tests/rls_conteudos.sql` (RLS, roda em transação desfeita).
+- Custos (públicos em 10/11/26): HeyGen Avatar IV ≈ US$ 4,83/min (~US$ 72 por vídeo de 15 min), Avatar III ≈ US$ 0,60/min; Claude: centavos a ~US$ 1 por roteiro.
+- O avatar (gêmeo digital) e a voz clonada são criados pelo médico no app da HeyGen; a DashMed só escolhe entre os que a conta tem.
 
 Se o produto for lidar com **dados de saúde**, a LGPD trata isso como dado sensível. Desenhe isso desde já:
 - acesso mínimo pela RLS;
