@@ -3,6 +3,7 @@ import { ChevronRight, PhoneOff, Upload } from "lucide-react";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import { dataBR, diasEntre, hojeSP, prazoTexto, somarDias } from "@/lib/datas";
 import { telefoneBR } from "@/lib/telefone";
+import { ROTULO_ETAPA } from "@/lib/crm";
 
 // Agenda: as terapias que precisam ser renovadas e quem precisa ser chamado
 // (David, 10/11/26). A chamada em si vai sair pelo sistema do Prospekt quando
@@ -57,8 +58,11 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
   const filtrar = (q: Consulta, qual: Aba): Consulta => {
     q = q.eq("cliente_id", emFoco.id).is("deleted_at", null);
     if (qual === "chamar") {
-      q = q.eq("situacao", "a_chamar").eq("revisar", false);
-      if (limite) q = q.or(`vence_em.is.null,vence_em.lte.${limite}`);
+      // Agenda = renovação por data: tem vencimento e está em contato ou já
+      // foi feita e vai vencer. Sem vencimento (ex.: cirurgia a resgatar) o
+      // lugar é o CRM (David, 11/11/26).
+      q = q.in("situacao", ["a_chamar", "tentativa", "em_conversa", "realizado"]).eq("revisar", false).not("vence_em", "is", null);
+      if (limite) q = q.lte("vence_em", limite);
       return q;
     }
     if (qual === "revisar") return q.eq("revisar", true).neq("situacao", "nao_renovar");
@@ -132,7 +136,10 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
           )}
 
           {linhas.length === 0 ? (
-            <p className="cartao p-6 text-sm text-zinc-500">Nada aqui{aba === "chamar" && janela !== "todas" ? " nesse prazo" : ""}.</p>
+            <p className="cartao p-6 text-sm text-zinc-500">
+              Nada aqui{aba === "chamar" && janela !== "todas" ? " nesse prazo" : ""}.
+              {aba === "chamar" && <> Terapias sem vencimento (como cirurgias a resgatar) ficam no <Link href="/crm" className="text-teal-800 underline">CRM</Link>.</>}
+            </p>
           ) : (
             <div className="cartao divide-y divide-zinc-100">
               {linhas.map((t) => {
@@ -149,6 +156,7 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
                     <div className="text-sm">
                       {t.procedimento}
                       {t.revisar && <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-700">revisar · {t.revisar_motivo}</span>}
+                      {t.situacao !== "a_chamar" && <span className="ml-2 rounded bg-teal-50 px-1.5 py-0.5 text-[11px] text-teal-800">{ROTULO_ETAPA[t.situacao] ?? t.situacao}</span>}
                       <div className="text-xs text-zinc-500">indicada em {dataBR(t.ultima_indicacao_em)}</div>
                     </div>
                     <div className="text-sm">

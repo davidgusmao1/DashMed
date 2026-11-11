@@ -7,11 +7,11 @@
 import { revalidatePath } from "next/cache";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import { lerData, lerPlanilha, lerTelefone, resumir, type Resumo } from "@/lib/planilha";
+import { ehEtapa } from "@/lib/crm";
 
 export type Retorno = { ok: boolean; texto: string } | null;
 
 const SESSAO = { ok: false, texto: "Sua sessão acabou. Entre de novo." } as const;
-const SITUACOES = ["a_chamar", "agendado", "nao_renovar"] as const;
 
 async function atualizar(tabela: "pacientes" | "terapias", id: string, valores: Record<string, unknown>): Promise<Retorno> {
   if (!(await usuarioAtual())) return SESSAO;
@@ -42,7 +42,7 @@ export async function salvarVencimento(_: Retorno, fd: FormData): Promise<Retorn
 
 export async function mudarSituacao(_: Retorno, fd: FormData): Promise<Retorno> {
   const situacao = String(fd.get("situacao") ?? "");
-  if (!SITUACOES.includes(situacao as (typeof SITUACOES)[number])) return { ok: false, texto: "Situação inválida." };
+  if (!ehEtapa(situacao)) return { ok: false, texto: "Situação inválida." };
   return (await atualizar("terapias", String(fd.get("terapia_id") ?? ""), { situacao }))
     ?? { ok: true, texto: "Situação salva." };
 }
@@ -94,14 +94,17 @@ export async function importarPlanilha(fd: FormData): Promise<Resultado> {
   }
   if (!leitura.linhas.length) return { ok: false, texto: "A planilha não tem nenhuma linha válida para importar." };
 
-  // prazo (em meses) de cada procedimento que tem linha sem vencimento
+  // Prazo (em meses) de cada procedimento que tem linha sem vencimento. Em
+  // branco = sem vencimento: cirurgia não "vence", o resgate é pelo CRM
+  // (David, 11/11/26).
   const prazos: Record<string, number> = {};
   for (const p of resumir(leitura).procedimentos) {
     if (!p.semVencimento) continue;
     const bruto = String(fd.get(`prazo:${p.nome}`) ?? "").trim();
+    if (!bruto) continue;
     const meses = Number(bruto);
-    if (!bruto || !Number.isInteger(meses) || meses < 0 || meses > 120) {
-      return { ok: false, texto: `Digite o prazo de "${p.nome}" em meses (um número de 0 a 120).` };
+    if (!Number.isInteger(meses) || meses < 0 || meses > 120) {
+      return { ok: false, texto: `O prazo de "${p.nome}" tem de ser um número inteiro de meses, de 0 a 120 (ou em branco).` };
     }
     prazos[p.nome] = meses;
   }

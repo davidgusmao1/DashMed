@@ -49,8 +49,9 @@ export default function Importador({ cliente }: { cliente: string }) {
           <li>{resultado.ja_existiam} linhas que já estavam na DashMed (não duplicaram)</li>
           {resultado.com_erro > 0 && <li>{resultado.com_erro} linhas com erro ficaram de fora (veja no histórico abaixo)</li>}
         </ul>
-        <div className="flex gap-2">
-          <Link href="/agenda" className="botao">Ver a Agenda</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/crm" className="botao">Ver o CRM</Link>
+          <Link href="/agenda" className="botao-claro">Ver a Agenda</Link>
           <button className="botao-claro" onClick={() => escolher(null)}>Importar outra</button>
         </div>
       </div>
@@ -75,8 +76,14 @@ export default function Importador({ cliente }: { cliente: string }) {
       {resumo && (
         <form onSubmit={importar} className="space-y-4">
           <div className="cartao space-y-2 p-5 text-sm">
-            <p><b>{resumo.validas}</b> linhas válidas · <b>{resumo.pacientes}</b> pacientes · <b>{resumo.paraRevisar}</b> marcadas para revisar</p>
+            <p>
+              <b>{resumo.validas}</b> terapias indicadas · <b>{resumo.pacientes}</b> pacientes ({resumo.comTelefone} com telefone)
+              {resumo.candidatos > 0 && <> · <b>{resumo.candidatos}</b> de candidatos</>}
+              {resumo.paraRevisar - resumo.candidatos > 0 && <> · <b>{resumo.paraRevisar - resumo.candidatos}</b> para revisar</>}
+            </p>
+            {resumo.abas.filter(Boolean).length > 0 && <p className="text-xs text-zinc-500">Abas lidas: {resumo.abas.join(", ")}</p>}
             <p className="text-xs text-zinc-500">Colunas encontradas: {resumo.colunas.map((c) => c.titulo).join(", ")}</p>
+            <p className="text-xs text-zinc-500">Uma linha com mais de um procedimento (ex.: &quot;ATQ/MAKO, AH&quot;) vira uma terapia para cada. Candidatos e indicações incertas entram marcados.</p>
             {resumo.erros.length > 0 && (
               <details className="text-xs text-zinc-700">
                 <summary className="cursor-pointer">{resumo.erros.length} linhas com erro vão ficar de fora</summary>
@@ -90,17 +97,20 @@ export default function Importador({ cliente }: { cliente: string }) {
 
           <div className="cartao space-y-3 p-5">
             <div>
-              <div className="text-sm font-semibold">Prazo até o vencimento</div>
-              <p className="text-xs text-zinc-500">Em meses, a partir da data da indicação. 0 = já entra como vencida (chamar logo). Depois dá para mudar a data de cada paciente.</p>
+              <div className="text-sm font-semibold">Prazo até o vencimento (opcional)</div>
+              <p className="text-xs text-zinc-500">
+                Em meses, a partir da data da indicação, para a <b>Agenda de renovação</b> (ex.: AH). Em branco = sem vencimento: o paciente
+                entra só no <b>CRM de resgate</b> (é o caso das cirurgias). 0 = já entra vencido. Depois dá para mudar a data de cada um.
+              </p>
             </div>
             {resumo.procedimentos.map((p) => (
-              <div key={p.nome} className="flex items-center gap-3">
-                <label htmlFor={`prazo:${p.nome}`} className="w-40 shrink-0 text-sm">
-                  {p.nome} <span className="text-xs text-zinc-500">({p.linhas})</span>
+              <div key={p.nome} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <label htmlFor={`prazo:${p.nome}`} className="w-44 shrink-0 text-sm">
+                  {p.nome} <span className="text-xs text-zinc-500">({p.linhas}{p.realizados ? `, ${p.realizados} já aplicados` : ""})</span>
                 </label>
                 {p.semVencimento > 0 ? (
                   <>
-                    <input id={`prazo:${p.nome}`} name={`prazo:${p.nome}`} type="number" min={0} max={120} step={1} required
+                    <input id={`prazo:${p.nome}`} name={`prazo:${p.nome}`} type="number" min={0} max={120} step={1} placeholder="—"
                       className="campo w-24" />
                     <span className="text-xs text-zinc-500">meses</span>
                   </>

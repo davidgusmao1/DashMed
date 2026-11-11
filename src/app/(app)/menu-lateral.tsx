@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, House, LogOut, Settings, type LucideIcon } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, House, LogOut, Settings, SquareKanban, type LucideIcon } from "lucide-react";
 import type { Cliente } from "@/lib/supabase/server";
 import { supabase } from "@/lib/supabase/client";
 import { escolherCliente } from "./acoes";
@@ -17,6 +17,9 @@ const ITENS: { href: string; label: string; icone: LucideIcon }[] = [
   // David, 10/11/26: "criar um menu na esquerda que vamos chamar de agenda
   // onde todos os pacientes que precisam renovar suas terapias precisam ser chamados"
   { href: "/agenda", label: "Agenda", icone: CalendarClock },
+  // David, 11/11/26: "organizar um CRM estilo kanban para que minhas
+  // secretárias entrem em contato com os pacientes que ainda não fizeram cirurgias"
+  { href: "/crm", label: "CRM", icone: SquareKanban },
   // David, 10/11/26: "no menu da esquerda criarmos um item que vai chamar
   // conteúdos para mídias sociais"
   { href: "/conteudos", label: "Conteúdos", icone: Clapperboard },
@@ -63,13 +66,16 @@ export default function MenuLateral({ nome, email, plataforma, clientes, emFoco 
     <>
       {/* celular: barra no topo */}
       <header className="flex items-center gap-1 border-b border-zinc-200 bg-surface px-3 py-2 md:hidden">
-        <span className="mr-2 grid size-8 place-items-center rounded-lg bg-teal-700 text-[10px] font-bold text-white">DM</span>
-        {ITENS.map(({ href, label, icone: Icone }) => (
-          <Link key={href} href={href} title={label} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${ativo(href) ? "bg-teal-700 text-white" : "text-zinc-600"}`}>
-            <Icone size={16} /> <span className="max-[479px]:sr-only">{label}</span>
-          </Link>
-        ))}
-        <div className="ml-auto w-32 min-w-0 sm:w-40">{seletor}</div>
+        <span className="mr-1 grid size-8 shrink-0 place-items-center rounded-lg bg-teal-700 text-[10px] font-bold text-white">DM</span>
+        {/* com cinco itens a fileira passa da largura do celular: rola de lado (11/11/26) */}
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {ITENS.map(({ href, label, icone: Icone }) => (
+            <Link key={href} href={href} title={label} className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium ${ativo(href) ? "bg-teal-700 text-white" : "text-zinc-600"}`}>
+              <Icone size={16} /> <span className="max-[479px]:sr-only">{label}</span>
+            </Link>
+          ))}
+        </nav>
+        <div className="w-28 shrink-0 sm:w-40">{seletor}</div>
         <button onClick={sair} className="rounded-lg p-2 text-zinc-500" title="Sair"><LogOut size={16} /></button>
       </header>
 

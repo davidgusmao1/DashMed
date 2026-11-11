@@ -5,6 +5,7 @@
 import { useActionState } from "react";
 import { confirmarIndicacao, mudarSituacao, salvarTelefone, salvarVencimento, type Retorno } from "../acoes";
 import { telefoneBR } from "@/lib/telefone";
+import { ETAPAS } from "@/lib/crm";
 
 function Aviso({ r }: { r: Retorno }) {
   if (!r) return null;
@@ -42,11 +43,7 @@ export function FormVencimento({ terapiaId, venceEm }: { terapiaId: string; venc
   );
 }
 
-const OPCOES = [
-  { valor: "a_chamar", rotulo: "A chamar" },
-  { valor: "agendado", rotulo: "Agendado" },
-  { valor: "nao_renovar", rotulo: "Não vai renovar" },
-];
+const OPCOES = ETAPAS;
 
 export function FormSituacao({ terapiaId, situacao }: { terapiaId: string; situacao: string }) {
   const [r, acao, salvando] = useActionState(mudarSituacao, null);
