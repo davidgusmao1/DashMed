@@ -237,12 +237,14 @@ Feito e no ar:
 - [x] Vercel ligada ao GitHub (6.5): push na `main` publica, PR ganha preview (10/11/26).
 - [x] **Conteúdos para mídias sociais** e **Configurações** (10/11/26) — ver 8.1.
 - [x] **Vigia** (regra 5): função SQL `vigiar()` rodando no pg_cron a cada 10 min (`dashmed-vigia`), achados na tabela `achados`.
+- [x] **Agenda** (10/11/26): terapias para renovar e quem precisa ser chamado, com importação da planilha de indicações — ver 8.2.
+- [x] Funções da Vercel em **gru1** (São Paulo), junto do banco (`vercel.json`): dado de paciente processado no Brasil e menos latência.
 
 Sugestão de ordem:
 1. **SMTP próprio** (Resend) + modelos de e-mail em português (5.3).
 2. **Usuários:** edge `usuarios` + tela (criar, desativar, papel), só para admin e plataforma.
 3. **Clientes:** tela só da plataforma (criar e editar cliente; soft delete).
-4. **Auditoria:** tabela `logs` (quem, o quê, quando, cliente) gravada por gatilho nas tabelas de negócio.
+4. **Auditoria:** a tabela `auditoria` (gatilho `auditar()`, 0003) já registra quem criou e mudou pacientes, terapias e indicações; falta ligar nas próximas tabelas de negócio e registrar quem **viu** dado de paciente.
 5. **Plano Pro do Supabase** antes de uso real: o Free pausa o projeto após 7 dias parado, limita a edge function a 150 s e arquivo a 50 MB.
 6. Ambiente de **homologação** (um segundo projeto Supabase ou branch) antes de dado real de paciente.
 7. Os demais itens do menu da DashMed, combinados com o David.
@@ -261,6 +263,16 @@ Pedido do David (10/11/26): assunto → referências em publicações médicas �
 - Testes: `deno run --allow-read supabase/tests/conteudos.ts` (regras de texto) e `supabase/tests/rls_conteudos.sql` (RLS, roda em transação desfeita).
 - Custos (públicos em 10/11/26): HeyGen Avatar IV ≈ US$ 4,83/min (~US$ 72 por vídeo de 15 min), Avatar III ≈ US$ 0,60/min; Claude: centavos a ~US$ 1 por roteiro.
 - O avatar (gêmeo digital) e a voz clonada são criados pelo médico no app da HeyGen; a DashMed só escolhe entre os que a conta tem.
+
+### 8.2 Agenda (renovação de terapias)
+Pedido do David (10/11/26): "um menu na esquerda que vamos chamar de agenda onde todos os pacientes que precisam renovar suas terapias precisam ser chamados".
+
+- **Modelo** (`0003_agenda.sql`): `pacientes` → `terapias` (paciente + procedimento, única por par; tem `vence_em` e `situacao`: `a_chamar`, `agendado`, `nao_renovar`) → `indicacoes` (uma por consulta: data, tipo de atendimento, trecho da evolução). `importacoes` guarda cada importação; `auditoria` registra criação e mudança por gatilho.
+- **Origem dos dados:** a planilha de indicações que o David já usa (exemplo: `indicacoes-protese-ah-hidrogel-ago-out-2026.xlsx`; colunas Paciente, Data, Procedimento, e se houver Horário, Tipo atendimento, Trecho evolução, Telefone, Vencimento). Tela `/agenda/importar`: prévia sem gravar → prazo em meses por procedimento → função `importar_planilha` (uma transação, `security invoker`, RLS de quem importa).
+- **Regras combinadas:** vencimento = data da última indicação + prazo do procedimento, ou a data digitada (`vence_em_manual`: a importação não recalcula por cima); "(incerto)"/"(histórico)" entram com `revisar` e só vão para a chamada depois de confirmados; telefone é digitado na ficha (a planilha não tem); reimportar não duplica (paciente pelo nome normalizado em `chave_importacao`, indicação única por terapia + data).
+- **Limitação conhecida:** sem CPF/id na planilha, dois pacientes homônimos viram um só na importação.
+- **Próximo passo:** a chamada vai pelo sistema do parceiro **Prospekt** (a API ainda vai ser passada). A Agenda já separa quem chamar; falta mandar a lista e receber o resultado de cada contato.
+- Teste: `npx supabase db query --remote --file supabase/tests/agenda.sql` (transação desfeita; 20 checagens de RLS e importação).
 
 Se o produto for lidar com **dados de saúde**, a LGPD trata isso como dado sensível. Desenhe isso desde já:
 - acesso mínimo pela RLS;
