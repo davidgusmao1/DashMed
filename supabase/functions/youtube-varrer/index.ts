@@ -96,6 +96,9 @@ async function lerNovos(v: Varredura, canalId: string, token: string): Promise<s
     mudanca.historico_ate = novos.length ? novos[novos.length - 1].publicado_em : null;
   }
   await admin.from("yt_varreduras").update(mudanca).eq("cliente_id", v.cliente_id);
+  if (primeiraLeitura) {
+    return `Primeira leitura: os ${gravados} comentário(s) mais recente(s). Os mais antigos vêm em seguida, página a página.`;
+  }
   return `${gravados} comentário(s) novo(s) lido(s).${!chegou ? " Muitos comentários novos: o resto entra na próxima rodada." : ""}`;
 }
 
@@ -167,12 +170,41 @@ async function passoTriar(clienteId: string): Promise<string> {
   return `${lote.length} comentário(s) triado(s): ${leads} lead(s), ${paraResponder} para responder.`;
 }
 
+/** Uma resposta pendente por pessoa (David, 12/11/26: "vamos ajustar" — na
+ *  primeira rodada a mesma pessoa recebeu duas respostas em comentários
+ *  diferentes, o que no YouTube parece spam). Se a pessoa já tem resposta na
+ *  fila, sendo publicada, ou publicada há menos de 7 dias, este comentário fica
+ *  no histórico do lead sem gerar outra resposta. */
+async function jaTemRespostaDaPessoa(leadId: string, comentarioId: string): Promise<boolean> {
+  const seteDias = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const { count } = await admin.from("yt_comentarios").select("id", { count: "exact", head: true })
+    .eq("lead_id", leadId).neq("id", comentarioId).is("deleted_at", null)
+    .or(`resposta.in.(rascunho,falhou,publicando),and(resposta.eq.publicada,publicada_em.gte.${seteDias})`);
+  return (count ?? 0) > 0;
+}
+
 async function passoRedigir(clienteId: string): Promise<string> {
   const c = await carregarConfig(clienteId);
-  const itens = await paraRedigir({ clienteId, limite: LOTE_REDACAO });
-  if (!itens.length) return "Nada para redigir.";
+  const candidatos = await paraRedigir({ clienteId, limite: LOTE_REDACAO * 3 });
+  if (!candidatos.length) return "Nada para redigir.";
+  const itens: typeof candidatos = [];
+  const pessoasDoLote = new Set<string>();
+  let juntados = 0;
+  for (const it of candidatos) {
+    if (itens.length >= LOTE_REDACAO) break;
+    if (it.lead_id && (pessoasDoLote.has(it.lead_id) || await jaTemRespostaDaPessoa(it.lead_id, it.id))) {
+      juntados++;
+      await admin.from("yt_comentarios").update({
+        resposta: "nenhuma", resposta_msg: "Mesma pessoa de outro comentário que já tem resposta (na fila ou publicada há menos de 7 dias): uma resposta por vez.",
+      }).eq("id", it.id);
+      continue;
+    }
+    if (it.lead_id) pessoasDoLote.add(it.lead_id);
+    itens.push(it);
+  }
+  if (!itens.length) return `${juntados} comentário(s) de quem já tem resposta: sem resposta nova.`;
   const r = await gravarRedacao(itens, await redigir(clienteId, itens, c));
-  return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}.`;
+  return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}${juntados ? `; ${juntados} de quem já tem resposta` : ""}.`;
 }
 
 /** Um passo da rodada e o disparo do seguinte. */

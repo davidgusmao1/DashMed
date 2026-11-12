@@ -139,7 +139,10 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
         </div>
       )}
       {r && (r.triagem_pendente > 0 || r.redigir > 0) && (
-        <p className="text-xs text-zinc-500">Na fila da IA: {r.triagem_pendente} comentário(s) para triar e {r.redigir} resposta(s) para escrever. A próxima varredura continua.</p>
+        <p className="text-xs text-zinc-500">
+          Na fila da IA: {r.triagem_pendente} comentário(s) para triar e {r.redigir} resposta(s) para escrever.{" "}
+          {v?.estado === "rodando" ? "A varredura em andamento continua daqui." : "A próxima varredura continua daqui."}
+        </p>
       )}
 
       <nav className="flex gap-1 overflow-x-auto border-b border-zinc-200 text-sm">

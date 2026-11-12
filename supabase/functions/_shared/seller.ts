@@ -123,6 +123,7 @@ export type ParaRedigir = {
   urgente: boolean;
   resumo: string | null;
   codigo: string;
+  lead_id: string | null;
 };
 
 const REGRAS_CFM = `Regras da Resolução CFM 2.336/2023 que toda resposta cumpre:
@@ -235,5 +236,6 @@ export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; l
   return linhas.map((l) => ({
     id: l.id, texto: l.texto, autor_nome: l.autor_nome, video_titulo: l.video_titulo, categoria: l.categoria,
     procedimentos: l.procedimentos ?? [], urgente: !!l.urgente, resumo: l.resumo, codigo: l.lead_id ? codigo.get(l.lead_id) ?? "" : "",
+    lead_id: l.lead_id ?? null,
   }));
 }
