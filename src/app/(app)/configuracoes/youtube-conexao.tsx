@@ -82,7 +82,7 @@ export default function YoutubeConexao({ clienteId, google, youtube, podeEditar,
         )}
         <div className="text-xs text-zinc-500">
           URI de redirecionamento autorizado (cole no Google Cloud):{" "}
-          <button type="button" className="inline-flex items-center gap-1 font-mono text-zinc-700 underline" onClick={async () => {
+          <button type="button" className="inline break-all text-left font-mono text-zinc-700 underline" onClick={async () => {
             try { await navigator.clipboard.writeText(REDIRECT_OAUTH); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch { /* sem área de transferência */ }
           }}>{REDIRECT_OAUTH} <Copy size={11} /></button>{copiado && " copiado"}
         </div>
