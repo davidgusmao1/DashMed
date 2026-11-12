@@ -179,3 +179,50 @@ export function consultaSegura(consulta: unknown): string | null {
   if (abre !== fecha || aspas % 2 !== 0) return null;
   return limpa;
 }
+
+// ── YouTube Seller: conferência da resposta antes de virar rascunho ─────
+// (David, 12/11/26). A resposta sai em nome do médico, então o que é fato
+// (telefone, endereço) só pode vir das configurações dele (regra 3).
+
+/** Tamanho máximo da resposta sugerida (o YouTube aceita mais; resposta curta
+ *  é lida e não parece spam). */
+export const LIMITE_RESPOSTA = 900;
+
+/** Telefones de um texto, só os dígitos (8 ou mais), sem o +55. */
+export function telefonesDoTexto(texto: string): string[] {
+  const achados = texto.match(/(?:\+?\d[\d\s().-]{6,}\d)/g) ?? [];
+  return achados
+    .map((t) => t.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, ""))
+    .filter((d) => d.length >= 8);
+}
+
+/** Todo telefone da resposta tem de estar nas configurações (compara os 8
+ *  últimos dígitos, que não mudam com DDD ou +55 escrito de outro jeito). */
+export function telefonesInventados(resposta: string, configuracao: string[]): string[] {
+  const conhecidos = new Set(configuracao.flatMap(telefonesDoTexto).map((d) => d.slice(-8)));
+  return telefonesDoTexto(resposta).filter((d) => !conhecidos.has(d.slice(-8)));
+}
+
+export function temLink(texto: string): boolean {
+  return /https?:\/\/|www\.|\b[a-z0-9-]+\.(com|com\.br|net|org|br|me|ly)\b/i.test(texto);
+}
+
+/** Se a resposta manda para algum telefone e não diz o código do lead, o
+ *  código vai no fim (é ele que liga a ligação ao comentário no CRM). */
+export function garantirCodigo(resposta: string, codigo: string): string {
+  const t = resposta.trim();
+  if (!codigo || !telefonesDoTexto(t).length || t.toUpperCase().includes(codigo.toUpperCase())) return t;
+  return `${t} (informe o código ${codigo})`;
+}
+
+/** Confere a resposta sugerida pela IA. Devolve o motivo se não puder virar
+ *  rascunho; null se está boa. */
+export function problemaNaResposta(resposta: string, configuracao: string[]): string | null {
+  const t = resposta.trim();
+  if (t.length < 20) return "A IA devolveu uma resposta vazia ou curta demais.";
+  if (t.length > LIMITE_RESPOSTA + 60) return `A resposta passou de ${LIMITE_RESPOSTA} caracteres.`;
+  if (temLink(t)) return "A IA pôs um link na resposta (o YouTube costuma segurar como spam).";
+  const inventados = telefonesInventados(t, configuracao);
+  if (inventados.length) return `A IA escreveu um telefone que não está nas suas configurações (${inventados.join(", ")}).`;
+  return null;
+}

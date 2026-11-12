@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, House, LogOut, Settings, SquareKanban, Users, type LucideIcon } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, House, LogOut, Megaphone, Settings, SquareKanban, Users, type LucideIcon } from "lucide-react";
 import type { Cliente } from "@/lib/supabase/server";
 import { supabase } from "@/lib/supabase/client";
 import { escolherCliente } from "./acoes";
@@ -23,6 +23,8 @@ const ITENS: { href: string; label: string; icone: LucideIcon; soAdmin?: boolean
   // David, 10/11/26: "no menu da esquerda criarmos um item que vai chamar
   // conteúdos para mídias sociais"
   { href: "/conteudos", label: "Conteúdos", icone: Clapperboard },
+  // David, 12/11/26: "uma aba nova no menu da esquerda ... YouTube Seller ... um social seller automatizado"
+  { href: "/youtube", label: "YouTube Seller", icone: Megaphone },
   { href: "/configuracoes", label: "Configurações", icone: Settings },
   // 11/11/26: criar e desativar as contas das secretárias (só admin e plataforma)
   { href: "/usuarios", label: "Usuários", icone: Users, soAdmin: true },

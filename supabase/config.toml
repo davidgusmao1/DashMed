@@ -29,3 +29,18 @@ verify_jwt = false
 # Exige a sessão de quem pede; a função confere se é admin do cliente ou da plataforma.
 [functions.usuarios]
 verify_jwt = true
+
+# YouTube Seller (12/11/26). youtube-responder exige a sessão (quem publica é
+# o médico). As outras duas se conferem sozinhas:
+# - youtube-oauth: a volta do Google chega pelo navegador, sem JWT; a proteção
+#   é o state (oauth_estados), de uso único e que expira em 15 min;
+# - youtube-varrer: aceita a sessão (auth.getUser), a chave de serviço (passo
+#   seguinte) ou o token do cron (x-dashmed-cron, DASHMED_CRON_TOKEN).
+[functions.youtube-oauth]
+verify_jwt = false
+
+[functions.youtube-varrer]
+verify_jwt = false
+
+[functions.youtube-responder]
+verify_jwt = true

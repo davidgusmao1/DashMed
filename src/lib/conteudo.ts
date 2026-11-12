@@ -78,7 +78,7 @@ export type Video = {
 };
 
 export type Integracao = {
-  provedor: "anthropic" | "heygen";
+  provedor: "anthropic" | "heygen" | "google" | "youtube";
   final: string;
   parametros: { avatar_id?: string; avatar_nome?: string; avatar_tipo?: string; voz_id?: string; voz_nome?: string; motor?: string | null };
   teste_ok: boolean | null;

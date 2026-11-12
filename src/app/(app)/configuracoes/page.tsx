@@ -1,21 +1,31 @@
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import type { Integracao, Perfil } from "@/lib/conteudo";
+import type { SellerConfig } from "@/lib/youtube";
 import Chaves from "./chaves";
 import PerfilForm from "./perfil-form";
+import SellerForm from "./seller-form";
+import YoutubeConexao from "./youtube-conexao";
 
 // Configurações do cliente em foco: perfil para os roteiros e chaves de API
 // (David, 10/11/26: "já nas configurações do sistema faça um local onde eu
 // posso colocar as APIs/tokens necessárias").
-export default async function Configuracoes() {
+export default async function Configuracoes({ searchParams }: { searchParams: Promise<{ youtube?: string; msg?: string }> }) {
+  // volta do Google ao conectar o canal (edge youtube-oauth)
+  const { youtube: volta, msg } = await searchParams;
+  const retornoYoutube = volta === "ok" ? { ok: true, texto: "Canal do YouTube conectado." }
+    : volta === "erro" ? { ok: false, texto: msg || "A conexão com o YouTube não deu certo." } : null;
   const eu = await usuarioAtual();
   if (!eu) return null;
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
   const supabase = await supabaseServidor();
-  const [{ data: integracoes }, { data: perfil }] = await Promise.all([
+  const [{ data: integracoes }, { data: perfil }, { data: seller }] = await Promise.all([
     supabase.from("integracoes").select("provedor, final, parametros, teste_ok, teste_msg, testada_em, atualizado_em").eq("cliente_id", emFoco.id),
     supabase.from("perfis_conteudo").select("nome_exibicao, especialidade, crm, rqe, publico, tom, chamada_final").eq("cliente_id", emFoco.id).maybeSingle(),
+    supabase.from("seller_config").select("automatico, procedimentos, telemedicina, porto_alegre, sao_paulo, telefone_estimativa, instrucoes, prob_minima, limite_diario")
+      .eq("cliente_id", emFoco.id).maybeSingle(),
   ]);
+  const lista = (integracoes ?? []) as Integracao[];
   const podeEditar = eu.plataforma || (eu.papel === "admin" && eu.cliente_id === emFoco.id);
 
   return (
@@ -31,11 +41,27 @@ export default async function Configuracoes() {
           As chaves ficam guardadas cifradas no cofre do banco. Depois de salvas, ninguém as vê de novo, nem esta tela: aparecem só os 4 últimos caracteres.
           Cada chave é testada com o provedor antes de ser guardada.
         </p>
-        <Chaves clienteId={emFoco.id} integracoes={(integracoes ?? []) as Integracao[]} podeEditar={podeEditar} />
+        <Chaves clienteId={emFoco.id} integracoes={lista.filter((i) => i.provedor === "anthropic" || i.provedor === "heygen")} podeEditar={podeEditar} />
         <div className="cartao p-5 text-sm">
           <div className="font-semibold">Publicações médicas: Europe PMC (PubMed)</div>
           <p className="text-zinc-600">Não precisa de chave. A busca usa só artigos indexados no PubMed, com PMID, para cada referência poder ser conferida.</p>
         </div>
+      </section>
+
+      <section id="youtube" className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">YouTube Seller</h2>
+        <p className="max-w-3xl text-sm text-zinc-600">
+          O robô lê os comentários do seu canal, separa quem tem chance de virar consulta ou procedimento e escreve uma resposta para você revisar e publicar.
+          Usa a chave da Claude acima para a triagem e as respostas.
+        </p>
+        <YoutubeConexao
+          clienteId={emFoco.id}
+          google={lista.find((i) => i.provedor === "google")}
+          youtube={lista.find((i) => i.provedor === "youtube")}
+          podeEditar={podeEditar}
+          retorno={retornoYoutube}
+        />
+        <SellerForm config={(seller ?? null) as SellerConfig | null} podeEditar={podeEditar} />
       </section>
 
       <section className="space-y-3">

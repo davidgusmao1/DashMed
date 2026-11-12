@@ -69,7 +69,7 @@ export function administra(u: Usuario, clienteId: string): boolean {
   return u.plataforma || (u.cliente_id === clienteId && u.papel === "admin");
 }
 
-export type Provedor = "anthropic" | "heygen";
+export type Provedor = "anthropic" | "heygen" | "google" | "youtube";
 
 export async function lerSegredo(clienteId: string, provedor: Provedor): Promise<string | null> {
   const { data, error } = await admin.rpc("ler_segredo", { p_cliente: clienteId, p_provedor: provedor });
