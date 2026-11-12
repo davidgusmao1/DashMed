@@ -23,6 +23,9 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // a volta do link do e-mail troca o código pela sessão (auth/callback)
   if (pathname.startsWith("/auth/")) return response;
+  // Política de Privacidade é pública: o Google exige a URL dela para o app
+  // OAuth do YouTube Seller (12/11/26)
+  if (pathname === "/privacidade") return response;
   const naEntrada = pathname === "/login";
   if (!logado && !naEntrada) return NextResponse.redirect(new URL("/login", request.url));
   if (logado && (naEntrada || pathname === "/")) return NextResponse.redirect(new URL("/inicio", request.url));
