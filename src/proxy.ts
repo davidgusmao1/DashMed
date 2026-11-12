@@ -30,5 +30,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg).*)"],
+  // dashmed-apolo.user.js fica público: o Tampermonkey baixa e atualiza o
+  // script sem a sessão da DashMed, e ele não tem nada secreto (12/11/26)
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|dashmed-apolo\\.user\\.js).*)"],
 };

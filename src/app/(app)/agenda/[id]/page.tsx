@@ -7,6 +7,7 @@ import { telefoneBR } from "@/lib/telefone";
 import { ROTULO_ETAPA, ROTULO_RESULTADO } from "@/lib/crm";
 import { EscolherResponsavel, RegistrarLigacao } from "../../crm/registrar-ligacao";
 import { FormConfirmar, FormSituacao, FormTelefone, FormVencimento } from "./editar";
+import BotaoApolo from "../../apolo/botao";
 
 // Ficha da terapia, usada pela Agenda e pelo CRM: o que quem vai ligar precisa
 // saber (telefones, por que foi indicada, ligações anteriores) e o que pode
@@ -28,7 +29,7 @@ type Terapia = {
   vence_em_manual: boolean; revisar: boolean; revisar_motivo: string | null; situacao: string; situacao_em: string;
   situacao_por: string | null; retornar_em: string | null; responsavel_id: string | null;
   ultima_realizacao_em: string | null; lado_pendente: boolean;
-  pacientes: { id: string; nome: string; telefone: string | null; telefones: string | null; email: string | null; nascimento: string | null } | null;
+  pacientes: { id: string; nome: string; telefone: string | null; telefones: string | null; email: string | null; nascimento: string | null; apolo_id: number | null } | null;
 };
 
 function idade(nascimento: string | null, hoje: string): string {
@@ -48,7 +49,7 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
   const { data, error } = await supabase.from("terapias")
     .select(`id, cliente_id, procedimento, ultima_indicacao_em, vence_em, vence_em_manual, revisar, revisar_motivo, situacao,
              situacao_em, situacao_por, retornar_em, responsavel_id, ultima_realizacao_em, lado_pendente,
-             pacientes(id, nome, telefone, telefones, email, nascimento)`)
+             pacientes(id, nome, telefone, telefones, email, nascimento, apolo_id)`)
     .eq("id", id).maybeSingle();
   if (error) return <p className="text-sm">Não consegui abrir a terapia: {error.message}</p>;
   if (!data) notFound();
@@ -119,6 +120,7 @@ export default async function FichaDaTerapia({ params }: { params: Promise<{ id:
           }).join(" · ")}</p>}
           {pac?.email && <p className="flex items-center gap-1.5 text-xs text-zinc-600"><Mail size={12} /> {pac.email}</p>}
           {pac && <FormTelefone pacienteId={pac.id} telefone={pac.telefone} />}
+          {pac && <BotaoApolo paciente={pac} />}
         </div>
         <div className="cartao space-y-3 p-5">
           <div className={rotulo}>Vencimento</div>

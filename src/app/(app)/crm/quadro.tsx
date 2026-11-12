@@ -12,6 +12,7 @@ import { dataBR, diasEntre, instanteBR } from "@/lib/datas";
 import { telefoneBR } from "@/lib/telefone";
 import { moverEtapa } from "./acoes";
 import { EscolherResponsavel, RegistrarLigacao } from "./registrar-ligacao";
+import BotaoApolo from "../apolo/botao";
 
 export type Cartao = {
   id: string;
@@ -28,7 +29,7 @@ export type Cartao = {
   vence_em: string | null;
   ultima_realizacao_em: string | null;
   lado_pendente: boolean;
-  pacientes: { nome: string; telefone: string | null } | null;
+  pacientes: { nome: string; telefone: string | null; apolo_id: number | null } | null;
 };
 export type Coluna = { etapa: Etapa; total: number; cartoes: Cartao[] };
 
@@ -165,6 +166,8 @@ export default function Quadro({ colunas, usuarios, hoje }: {
             <div className="mt-4 space-y-3 border-t border-zinc-100 pt-4">
               <EscolherResponsavel terapiaId={aberto.id} responsavelId={aberto.responsavel_id} usuarios={usuarios} />
               <Link href={`/agenda/${aberto.id}`} className="botao-claro w-full">Abrir ficha completa (prontuário, ligações, telefones)</Link>
+              {/* David, 12/11/26: "abrir ficha no Apolo Ninsaúde ... numa outra aba" */}
+              <BotaoApolo paciente={aberto.pacientes} />
             </div>
           </div>
         </div>

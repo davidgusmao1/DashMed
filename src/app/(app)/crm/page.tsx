@@ -40,7 +40,7 @@ export default async function Crm({ searchParams }: { searchParams: Promise<{ [k
   type Consulta = ReturnType<ReturnType<typeof supabase.from>["select"]>;
   const campos = `id, procedimento, ultima_indicacao_em, revisar, revisar_motivo, situacao, retornar_em, contatos_qtd,
     ultimo_contato_em, ultimo_resultado, responsavel_id, vence_em, ultima_realizacao_em, lado_pendente,
-    pacientes${busca ? "!inner" : ""}(nome, telefone)`;
+    pacientes${busca ? "!inner" : ""}(nome, telefone, apolo_id)`;
   const hoje = hojeSP();
   const coluna = (etapa: Etapa) => {
     let q = (supabase.from("terapias").select(campos, { count: "exact" }) as unknown as Consulta)
