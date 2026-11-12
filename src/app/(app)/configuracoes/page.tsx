@@ -4,6 +4,7 @@ import type { SellerConfig } from "@/lib/youtube";
 import Chaves from "./chaves";
 import PerfilForm from "./perfil-form";
 import SellerForm from "./seller-form";
+import Treinos, { type Treino } from "./treinos";
 import YoutubeConexao from "./youtube-conexao";
 
 // Configurações do cliente em foco: perfil para os roteiros e chaves de API
@@ -19,13 +20,21 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
   const supabase = await supabaseServidor();
-  const [{ data: integracoes }, { data: perfil }, { data: seller }] = await Promise.all([
+  const [{ data: integracoes }, { data: perfil }, { data: seller }, { data: treinos }, { data: usuarios }] = await Promise.all([
     supabase.from("integracoes").select("provedor, final, parametros, teste_ok, teste_msg, testada_em, atualizado_em").eq("cliente_id", emFoco.id),
     supabase.from("perfis_conteudo").select("nome_exibicao, especialidade, crm, rqe, publico, tom, chamada_final").eq("cliente_id", emFoco.id).maybeSingle(),
     supabase.from("seller_config").select("automatico, procedimentos, telemedicina, porto_alegre, sao_paulo, telefone_estimativa, instrucoes, prob_minima, limite_diario")
       .eq("cliente_id", emFoco.id).maybeSingle(),
+    supabase.from("seller_treinos").select("id, texto, origem, ativo, criado_em, criado_por, comentario_id")
+      .eq("cliente_id", emFoco.id).order("criado_em", { ascending: false }).limit(200),
+    supabase.from("usuarios").select("id, nome"),
   ]);
   const lista = (integracoes ?? []) as Integracao[];
+  const nomes = new Map((usuarios ?? []).map((u) => [u.id as string, u.nome as string]));
+  const listaTreinos: Treino[] = (treinos ?? []).map((t) => ({
+    id: t.id, texto: t.texto, origem: t.origem, ativo: t.ativo, criado_em: t.criado_em,
+    autor: t.criado_por ? nomes.get(t.criado_por) ?? null : null, do_comentario: !!t.comentario_id,
+  }));
   const podeEditar = eu.plataforma || (eu.papel === "admin" && eu.cliente_id === emFoco.id);
 
   return (
@@ -62,6 +71,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
           retorno={retornoYoutube}
         />
         <SellerForm config={(seller ?? null) as SellerConfig | null} podeEditar={podeEditar} />
+        <Treinos clienteId={emFoco.id} treinos={listaTreinos} podeEditar={podeEditar} />
       </section>
 
       <section className="space-y-3">

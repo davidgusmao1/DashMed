@@ -6,13 +6,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ExternalLink, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
+import { ExternalLink, GraduationCap, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
 import { type Comentario, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
 import { ignorarResposta, salvarRascunho } from "./acoes";
+import JanelaTreino from "./treino";
 
-function Cartao({ c, codigo, canal }: { c: Comentario; codigo: string | null; canal: string }) {
+function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string | null; canal: string; clienteId: string }) {
   const router = useRouter();
   const [texto, setTexto] = useState(c.rascunho ?? "");
   const [editado, setEditado] = useState(false);
@@ -21,6 +22,19 @@ function Cartao({ c, codigo, canal }: { c: Comentario; codigo: string | null; ca
   const [trocarEdicao, setTrocarEdicao] = useState(false);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [treinando, setTreinando] = useState(false);
+
+  /** depois de salvar um treinamento: refaz esta resposta já com ele */
+  async function refazerComTreino(refazerAgora: boolean, trocar: boolean) {
+    if (!refazerAgora) return;
+    setOcupado("refazer");
+    const r = await chamarFuncao<{ mensagem: string }>("youtube-responder", {
+      acao: "refazer", comentario_id: c.id, sobrescrever: (c.rascunho_editado || editado) && trocar,
+    });
+    setOcupado(null);
+    setAviso(r.ok ? { ok: true, texto: "Treinamento salvo e resposta refeita com ele." } : { ok: false, texto: `Treinamento salvo, mas a resposta não foi refeita: ${r.erro}` });
+    router.refresh();
+  }
 
   async function publicar() {
     setOcupado("publicar");
@@ -132,20 +146,26 @@ function Cartao({ c, codigo, canal }: { c: Comentario; codigo: string | null; ca
           {editado && <button className="botao-claro" onClick={guardar} disabled={!!ocupado}>{ocupado === "salvar" ? "Salvando…" : "Salvar rascunho"}</button>}
           <button className="botao-claro" onClick={() => setModo("refazer")} disabled={!!ocupado}><Sparkles size={14} /> Refazer com a IA</button>
           <button className="botao-claro" onClick={ignorar} disabled={!!ocupado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
+          <button className="botao-claro" onClick={() => setTreinando(true)} disabled={!!ocupado}><GraduationCap size={14} /> Treinamento da IA</button>
         </div>
+      )}
+      {ocupado === "refazer" && modo === "ver" && <p className="flex items-center gap-2 text-sm text-zinc-600"><LoaderCircle size={14} className="animate-spin" /> Refazendo a resposta com o treinamento…</p>}
+      {treinando && (
+        <JanelaTreino clienteId={clienteId} comentarioId={c.id} comentario={c.texto} rascunho={texto} editado={c.rascunho_editado || editado}
+          aoFechar={() => setTreinando(false)} aoSalvar={refazerComTreino} />
       )}
       {aviso && <p className={`rounded-lg px-3 py-2 text-sm ${aviso.ok ? "bg-teal-50 text-teal-900" : "bg-zinc-100 text-zinc-900"}`}>{aviso.texto}</p>}
     </li>
   );
 }
 
-export default function Fila({ comentarios, codigos, canal }: { comentarios: Comentario[]; codigos: Record<string, string>; canal: string }) {
+export default function Fila({ comentarios, codigos, canal, clienteId }: { comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string }) {
   if (!comentarios.length) {
     return <p className="cartao p-5 text-sm text-zinc-500">Nenhuma resposta esperando revisão. Quando a varredura achar comentários com chance de virar consulta, as respostas aparecem aqui.</p>;
   }
   return (
     <ul className="space-y-3">
-      {comentarios.map((c) => <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} />)}
+      {comentarios.map((c) => <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId} />)}
     </ul>
   );
 }

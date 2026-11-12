@@ -33,6 +33,8 @@ insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, 
          'Doutor, quanto custa a prótese?', now(), 'feita', 80, 'rascunho', 'Oi, Maria!', id from ids where nome = 'a';
 insert into lead_eventos (cliente_id, lead_id, tipo, texto) select '00000000-0000-4000-8000-0000000000c2', id, 'comentario', 'comentou' from ids where nome = 'a';
 
+insert into seller_treinos (id, cliente_id, texto) values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000c2', 'Comece agradecendo a pergunta.');
+
 -- o mesmo comentário não entra duas vezes
 do $$ begin
   insert into yt_comentarios (cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, texto, publicado_em)
@@ -62,6 +64,12 @@ end $$;
 do $$ begin
   update leads set etapa = 'perdido' where cliente_id = '00000000-0000-4000-8000-0000000000c2';
   insert into resultado values ('fora não move lead', not found, 'moveu');
+end $$;
+insert into resultado select 'fora vê 0 treinamentos', count(*) = 0, count(*)::text from seller_treinos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+do $$ begin
+  insert into seller_treinos (cliente_id, texto) values ('00000000-0000-4000-8000-0000000000c2', 'invasão');
+  insert into resultado values ('fora não treina a IA', false, 'treinou');
+exception when others then insert into resultado values ('fora não treina a IA', true, sqlerrm);
 end $$;
 
 -- ── 2. equipe da PLATAFORMA ──
@@ -130,6 +138,27 @@ do $$ begin
   update yt_varreduras set estado = 'parada' where cliente_id = '00000000-0000-4000-8000-0000000000c2';
   insert into resultado values ('sessão não mexe na varredura', false, 'mexeu');
 exception when insufficient_privilege then insert into resultado values ('sessão não mexe na varredura', true, sqlerrm);
+end $$;
+
+insert into resultado select 'plataforma vê o treinamento', count(*) = 1, count(*)::text from seller_treinos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+do $$ begin
+  insert into seller_treinos (cliente_id, texto, origem) values ('00000000-0000-4000-8000-0000000000c2', 'Não fale de SUS.', 'voz');
+  insert into resultado values ('plataforma treina a IA (voz)', true, '');
+exception when others then insert into resultado values ('plataforma treina a IA (voz)', false, sqlerrm);
+end $$;
+do $$ begin
+  update seller_treinos set ativo = false where id = '00000000-0000-4000-8000-0000000000f1';
+  insert into resultado values ('plataforma desativa treinamento', found, '');
+end $$;
+do $$ begin
+  update seller_treinos set cliente_id = '00000000-0000-4000-8000-0000000000c1' where id = '00000000-0000-4000-8000-0000000000f1';
+  insert into resultado values ('sessão não muda o cliente do treinamento', false, 'mudou');
+exception when insufficient_privilege then insert into resultado values ('sessão não muda o cliente do treinamento', true, sqlerrm);
+end $$;
+do $$ begin
+  delete from seller_treinos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+  insert into resultado values ('sessão não apaga treinamento', false, 'apagou');
+exception when insufficient_privilege then insert into resultado values ('sessão não apaga treinamento', true, sqlerrm);
 end $$;
 
 -- ── 3. anon ──

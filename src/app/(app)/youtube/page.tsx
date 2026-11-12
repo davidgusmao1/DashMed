@@ -51,7 +51,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
     const lista = (data ?? []) as Comentario[];
     const ids = [...new Set(lista.map((c) => c.lead_id).filter(Boolean))] as string[];
     const { data: leads } = ids.length ? await supabase.from("leads").select("id, codigo").in("id", ids) : { data: [] };
-    conteudo = <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} />;
+    conteudo = <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} />;
   } else if (aba === "leads") {
     const { data } = await supabase.from("leads")
       .select("id, nome, foto_url, codigo, etapa, probabilidade, procedimentos, proximo_passo_em, atualizado_em, paciente_id")

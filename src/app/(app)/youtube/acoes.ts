@@ -103,3 +103,33 @@ export async function buscarPacientes(clienteId: string, termo: string): Promise
     .ilike("nome", `%${t.replace(/[%_\\]/g, "")}%`).order("nome").limit(10);
   return (data ?? []) as { id: string; nome: string }[];
 }
+
+/** Treinamento da IA (David, 12/11/26). Fica gravado até ser desativado; os
+ *  ativos entram em toda triagem e resposta nova. A RLS decide quem pode
+ *  (admin do cliente ou plataforma: a voz da resposta é a do médico). */
+export async function salvarTreino(clienteId: string, texto: string, origem: "texto" | "voz", comentarioId: string | null): Promise<Resultado> {
+  const t = texto.trim();
+  if (t.length < 3) return { ok: false, msg: "Escreva (ou fale) o que a IA deve aprender." };
+  if (t.length > 2000) return { ok: false, msg: "Treinamento longo demais (até 2.000 caracteres). Divida em mais de um." };
+  const supabase = await supabaseServidor();
+  const { error } = await supabase.from("seller_treinos").insert({ cliente_id: clienteId, texto: t, origem, comentario_id: comentarioId });
+  if (error) return { ok: false, msg: /row-level security|permission/i.test(error.message) ? "Só o administrador do cliente ou a equipe da plataforma treina a IA." : error.message };
+  revalidatePath("/configuracoes");
+  return { ok: true, msg: "Treinamento salvo. Vale para as próximas triagens e respostas." };
+}
+
+export async function mudarTreino(id: string, campos: { ativo?: boolean; texto?: string }): Promise<Resultado> {
+  const mudanca: { ativo?: boolean; texto?: string } = {};
+  if (typeof campos.ativo === "boolean") mudanca.ativo = campos.ativo;
+  if (typeof campos.texto === "string") {
+    const t = campos.texto.trim();
+    if (t.length < 3 || t.length > 2000) return { ok: false, msg: "O treinamento precisa ter entre 3 e 2.000 caracteres." };
+    mudanca.texto = t;
+  }
+  const supabase = await supabaseServidor();
+  const { data, error } = await supabase.from("seller_treinos").update(mudanca).eq("id", id).select("id");
+  const f = falha(error, data);
+  if (f) return f;
+  revalidatePath("/configuracoes");
+  return { ok: true, msg: mudanca.ativo === false ? "Desativado: a IA deixa de usar." : mudanca.ativo ? "Reativado." : "Salvo." };
+}

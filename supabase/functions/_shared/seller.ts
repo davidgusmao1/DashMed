@@ -32,6 +32,29 @@ export async function carregarConfig(clienteId: string): Promise<Config> {
   return { ...PADRAO, ...(data ?? {}) } as Config;
 }
 
+/** Treinamento da IA (David, 12/11/26: "um botão escrito treinamento da IA,
+ *  onde eu vou falar algumas coisas para treinar para que as próximas respostas
+ *  sigam um determinado padrão"). Os ativos, do mais antigo ao mais novo; entram
+ *  os 40 mais recentes, até ~8.000 caracteres (o mais recente vale mais). */
+export async function carregarTreinos(clienteId: string): Promise<string> {
+  const { data } = await admin.from("seller_treinos").select("texto, criado_em")
+    .eq("cliente_id", clienteId).eq("ativo", true).order("criado_em", { ascending: false }).limit(40);
+  const itens: string[] = [];
+  let total = 0;
+  for (const t of data ?? []) {
+    const linha = `- (${new Date(t.criado_em).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}) ${String(t.texto).trim()}`;
+    if (total + linha.length > 8000) break;
+    itens.push(linha);
+    total += linha.length;
+  }
+  return itens.reverse().join("\n");
+}
+
+function blocoTreino(treinos: string, para: "triagem" | "resposta"): string {
+  if (!treinos) return "";
+  return `\n\nTREINAMENTO DO MÉDICO (orientações que ele deu para ${para === "resposta" ? "as respostas" : "a triagem"}; siga sempre, sem quebrar as regras do CFM nem inventar telefone ou endereço; se duas orientações se contradizem, vale a mais recente; ${para === "triagem" ? "use só as que falam de quem é lead, de probabilidade, de procedimento ou de urgência" : "use as que falam de tom, conteúdo, oferta e formato"}):\n${treinos}`;
+}
+
 /** Os textos de onde a resposta pode tirar telefone e endereço. */
 export function textosConfigurados(c: Config): string[] {
   return [c.telemedicina, c.porto_alegre, c.sao_paulo, c.telefone_estimativa].filter(Boolean);
@@ -43,7 +66,7 @@ export const CATEGORIAS = ["agendamento", "preco", "tratamento", "sintoma", "pos
 export type ParaTriar = { id: string; texto: string; autor_nome: string; video_titulo: string | null };
 export type Avaliacao = { probabilidade: number; categoria: string; procedimentos: string[]; urgente: boolean; resumo: string };
 
-function sistemaTriagem(c: Config, especialidade: string): string {
+function sistemaTriagem(c: Config, especialidade: string, treinos: string): string {
   return `Você faz a triagem dos comentários do canal do YouTube de um médico brasileiro (${especialidade || "especialidade não informada"}).
 O objetivo é achar quem tem chance de marcar consulta ou fazer com ele um destes procedimentos: ${c.procedimentos.join("; ")}.
 Para CADA comentário (identificado por c1, c2, ...), devolva:
@@ -57,11 +80,11 @@ Para CADA comentário (identificado por c1, c2, ...), devolva:
 - procedimentos: os da lista que o comentário menciona ou sugere, escritos exatamente como na lista (vazio se nenhum);
 - urgente: true se o texto sugere algo que precisa de atendimento imediato (febre, vermelhidão ou secreção na ferida depois de cirurgia; dor súbita e muito forte; não consegue apoiar o pé depois de queda; perna inchada e dolorida ou falta de ar depois de cirurgia);
 - resumo: até 20 palavras, em português, do que a pessoa quer.
-Avalie só pelo texto; não invente. Comentário em outra língua: avalie igual.`;
+Avalie só pelo texto; não invente. Comentário em outra língua: avalie igual.${blocoTreino(treinos, "triagem")}`;
 }
 
 export async function triar(clienteId: string, itens: ParaTriar[], c: Config): Promise<Map<string, Avaliacao>> {
-  const perfil = await carregarPerfil(clienteId);
+  const [perfil, treinos] = await Promise.all([carregarPerfil(clienteId), carregarTreinos(clienteId)]);
   const claude = await claudeDoCliente(clienteId, 100_000);
   const esquema = {
     type: "object",
@@ -88,7 +111,7 @@ export async function triar(clienteId: string, itens: ParaTriar[], c: Config): P
   };
   const pedido = itens.map((x, i) => `c${i + 1} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}\n${x.texto.slice(0, 1500)}`).join("\n\n");
   const r = await pedirJson<{ avaliacoes: (Avaliacao & { id: string })[] }>(claude, {
-    sistema: sistemaTriagem(c, perfil?.especialidade ?? ""), pedido: `COMENTÁRIOS:\n\n${pedido}`, esquema, esforco: "low", maxTokens: 16000, timeoutMs: 95_000,
+    sistema: sistemaTriagem(c, perfil?.especialidade ?? "", treinos), pedido: `COMENTÁRIOS:\n\n${pedido}`, esquema, esforco: "low", maxTokens: 16000, timeoutMs: 95_000,
   });
   const mapa = new Map<string, Avaliacao>();
   for (const a of r.avaliacoes ?? []) {
@@ -132,7 +155,7 @@ const REGRAS_CFM = `Regras da Resolução CFM 2.336/2023 que toda resposta cumpr
 - não promete nem insinua resultado ("vai ficar bom", "resolve", "garantido"); não usa "o melhor", "o único", "o mais moderno";
 - não fala de preço; não compara com colegas nem desmerece outros tratamentos.`;
 
-function sistemaResposta(c: Config, perfil: string): string {
+function sistemaResposta(c: Config, perfil: string, treinos: string): string {
   const opcao = (s: string) => (s.trim() ? s.trim() : "NÃO OFERECER");
   return `Você escreve respostas a comentários no canal do YouTube do médico abaixo, NA VOZ DELE (primeira pessoa), para ele revisar e publicar.
 
@@ -144,7 +167,8 @@ Cada resposta:
 - tem de 2 a 5 frases e no máximo ${LIMITE_RESPOSTA - 100} caracteres; sem hashtags, sem links, no máximo um emoji;
 - se o comentário sugerir urgência, a PRIMEIRA frase orienta procurar atendimento de urgência agora;
 - convida para uma avaliação oferecendo SÓ as opções configuradas abaixo, com telefone, cidade e endereço exatamente como estão escritos (nunca invente telefone, endereço, preço, prazo ou convênio); ofereça as que fazem sentido para a pessoa, não precisa listar todas;
-- quando sugerir a estimativa de custo de um tratamento, diga para chamar no telefone de estimativa e informar o código do comentário (ex.: "informe o código YT1234");
+- sempre que mandar a pessoa para um telefone ou WhatsApp, peça na mesma frase para ela dizer o código do comentário (ex.: "chame no WhatsApp (51) 0000-0000 e diga que veio do YouTube, código YT1234"); é assim que a equipe sabe de que comentário veio;
+- quando sugerir a estimativa de custo de um tratamento, use o telefone de estimativa;
 - elogio ou agradecimento sem pergunta: agradeça em uma ou duas frases, sem oferta;
 - cada resposta é escrita para aquele comentário: não repita a mesma abertura nem o mesmo fechamento entre as respostas do lote.
 
@@ -154,13 +178,13 @@ Opções de atendimento configuradas:
 - Consulta presencial em São Paulo: ${opcao(c.sao_paulo)}
 - Estimativa de custo de tratamento (telefone): ${opcao(c.telefone_estimativa)}
 ${c.instrucoes.trim() ? `\nInstruções do médico: ${c.instrucoes.trim()}\n` : ""}
-${REGRAS_CFM}`;
+${REGRAS_CFM}${blocoTreino(treinos, "resposta")}`;
 }
 
 export type Redigido = { texto: string; problema: string | null };
 
 export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config, instrucao?: string): Promise<Map<string, Redigido>> {
-  const perfil = await carregarPerfil(clienteId);
+  const [perfil, treinos] = await Promise.all([carregarPerfil(clienteId), carregarTreinos(clienteId)]);
   const claude = await claudeDoCliente(clienteId, 110_000);
   const esquema = {
     type: "object",
@@ -184,7 +208,7 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
     `comentário: ${x.texto.slice(0, 2000)}`,
   ].join("\n")).join("\n\n");
   const r = await pedirJson<{ respostas: { id: string; texto: string }[] }>(claude, {
-    sistema: sistemaResposta(c, perfilEmTexto(perfil)),
+    sistema: sistemaResposta(c, perfilEmTexto(perfil), treinos),
     pedido: `${instrucao ? `Pedido do médico para esta versão: ${instrucao}\n\n` : ""}COMENTÁRIOS:\n\n${pedido}`,
     esquema, esforco: "medium", maxTokens: 16000, timeoutMs: 110_000,
   });
