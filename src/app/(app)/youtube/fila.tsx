@@ -147,6 +147,7 @@ function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string
           <button className="botao-claro" onClick={() => setModo("refazer")} disabled={!!ocupado}><Sparkles size={14} /> Refazer com a IA</button>
           <button className="botao-claro" onClick={ignorar} disabled={!!ocupado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
           <button className="botao-claro" onClick={() => setTreinando(true)} disabled={!!ocupado}><GraduationCap size={14} /> Treinamento da IA</button>
+          <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro"><ExternalLink size={14} /> Ver no YouTube</a>
         </div>
       )}
       {ocupado === "refazer" && modo === "ver" && <p className="flex items-center gap-2 text-sm text-zinc-600"><LoaderCircle size={14} className="animate-spin" /> Refazendo a resposta com o treinamento…</p>}

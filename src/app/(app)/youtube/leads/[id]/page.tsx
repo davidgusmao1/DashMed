@@ -23,7 +23,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
   const lead = l as Lead & { cliente_id: string };
 
   const [{ data: comentarios }, { data: eventos }, { data: usuarios }, { data: paciente }] = await Promise.all([
-    supabase.from("yt_comentarios").select("id, comentario_id, video_id, video_titulo, texto, publicado_em, probabilidade, categoria, urgente, resposta, rascunho, publicada_em")
+    supabase.from("yt_comentarios").select("id, comentario_id, video_id, video_titulo, texto, publicado_em, probabilidade, categoria, urgente, resposta, rascunho, publicada_em, resposta_youtube_id")
       .eq("lead_id", id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(50),
     supabase.from("lead_eventos").select("id, tipo, texto, feito_por, feito_em").eq("lead_id", id).order("feito_em", { ascending: false }).limit(200),
     supabase.from("usuarios").select("id, nome").eq("ativo", true).is("deleted_at", null).order("nome"),
@@ -76,6 +76,18 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
                 {(c.resposta === "rascunho" || c.resposta === "falhou") && (
                   <Link href="/youtube?aba=fila" className="text-xs underline">resposta esperando revisão na fila</Link>
                 )}
+                {/* abre o vídeo com o comentário destacado no topo (David, 12/11/26:
+                    "ver o comentário lá no YouTube original da paciente") */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro px-3 py-1.5 text-xs">
+                    <ExternalLink size={13} /> Ver no YouTube
+                  </a>
+                  {c.resposta === "publicada" && c.resposta_youtube_id && (
+                    <a href={LINK_VIDEO(c.video_id, c.resposta_youtube_id)} target="_blank" rel="noreferrer" className="botao-claro px-3 py-1.5 text-xs">
+                      <ExternalLink size={13} /> Ver minha resposta no YouTube
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </section>
