@@ -56,10 +56,32 @@ async function contar(clienteId: string, campo: "triagem" | "resposta", valor: s
   return count ?? 0;
 }
 
+/** sha256 de "cliente:canal", igual a hash_autor_youtube() da 0018. */
+async function hashAutor(clienteId: string, autor: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${clienteId}:${autor}`));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Quem pediu para ser anonimizado (LGPD, 0018) não volta a ser lido: tira
+ *  da lista os comentários de canais em yt_bloqueados. */
+async function semBloqueados<T extends { autor_canal_id: string | null }>(clienteId: string, itens: T[]): Promise<T[]> {
+  if (!itens.length) return itens;
+  const { data, error } = await admin.from("yt_bloqueados").select("autor_hash").eq("cliente_id", clienteId).limit(10000);
+  if (error) throw new Falha(`Não consegui conferir os pedidos de anonimização (${error.message}).`, 500);
+  const bloqueados = new Set((data ?? []).map((b) => b.autor_hash as string));
+  if (!bloqueados.size) return itens;
+  const ficam: T[] = [];
+  for (const i of itens) {
+    if (i.autor_canal_id && bloqueados.has(await hashAutor(clienteId, i.autor_canal_id))) continue;
+    ficam.push(i);
+  }
+  return ficam;
+}
+
 /** Grava os comentários lidos (o mesmo comentário não entra duas vezes). */
 async function gravarLidos(clienteId: string, canalId: string, token: string, itens: ComentarioLido[]): Promise<number> {
   // comentário do próprio canal não é lead
-  const deFora = itens.filter((c) => c.autor_canal_id !== canalId && c.texto.trim());
+  const deFora = await semBloqueados(clienteId, itens.filter((c) => c.autor_canal_id !== canalId && c.texto.trim()));
   if (!deFora.length) return 0;
   const videos = [...new Set(deFora.map((c) => c.video_id).filter(Boolean))];
   let titulos = new Map<string, string>();
@@ -155,7 +177,7 @@ async function lerConversas(clienteId: string, canalId: string, token: string): 
     if (depois.length) {
       const { data: ja } = await admin.from("yt_comentarios").select("thread_id").eq("cliente_id", clienteId).in("thread_id", depois.map((m) => m.id));
       const conhecidas = new Set((ja ?? []).map((x) => x.thread_id as string));
-      const ineditas = depois.filter((m) => !conhecidas.has(m.id));
+      const ineditas = await semBloqueados(clienteId, depois.filter((m) => !conhecidas.has(m.id)));
       if (ineditas.length) {
         // a pessoa escreveu de novo: sugestão antiga desta conversa, não
         // editada, sai da fila (uma resposta por conversa, para a mais nova)
@@ -271,7 +293,10 @@ async function passoRedigir(clienteId: string): Promise<string> {
 async function atualizarCatalogo(clienteId: string, canalId: string, token: string): Promise<string> {
   // reserva a cota antes (1.000 vídeos = 21 unidades no máximo)
   await gastarCota(clienteId, 21);
-  const { videos } = await videosDoCanal(token, canalId);
+  // a playlist de uploads pode repetir um vídeo entre páginas (visto na 1ª
+  // leitura, 14/11/26): um por video_id, senão o upsert recusa o lote
+  const { videos: lidos } = await videosDoCanal(token, canalId);
+  const videos = [...new Map(lidos.map((v) => [v.video_id, v])).values()];
   const agora = new Date().toISOString();
   for (let i = 0; i < videos.length; i += 200) {
     const { error } = await admin.from("yt_videos").upsert(

@@ -55,6 +55,21 @@ do $$ begin
 exception when unique_violation then insert into resultado values ('vídeo repetido é recusado', true, '');
 end $$;
 
+-- LGPD (0018): o hash do canal é o mesmo no banco e na edge (hashAutor, youtube-varrer)
+insert into resultado select 'hash do autor igual no banco e na edge', hash_autor_youtube('00000000-0000-4000-8000-0000000000c2', 'UCpessoa') = 'd7d77630deae2db23f9cf1e1e8831ae558cf68906b8fc5ef6749e7a8b56241c9', '';
+
+-- A anonimização só pode tocar a auditoria do próprio lead e dos eventos dele
+-- (pedido da sessão "DM - Pacientes", 14/11/26): a de outro lead e a de
+-- paciente ficam intactas, mesmo com o lead ligado ao paciente (o dado clínico
+-- tem outra base legal e não sai com o lead).
+update leads set nome = 'João P.' where id = (select id from ids where nome = 'c');
+insert into pacientes (id, cliente_id, nome) values ('00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000c2', 'Maria Paciente');
+update pacientes set nome = 'Maria Paciente S.' where id = '00000000-0000-4000-8000-0000000000b1';
+update leads set paciente_id = '00000000-0000-4000-8000-0000000000b1' where id = (select id from ids where nome = 'a');
+create temp table auditoria_retrato on commit drop as
+  select id, antes from auditoria
+  where (tabela = 'leads' and registro_id = (select id from ids where nome = 'c')) or (tabela = 'pacientes' and registro_id = '00000000-0000-4000-8000-0000000000b1');
+
 -- o mesmo comentário não entra duas vezes
 do $$ begin
   insert into yt_comentarios (cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, texto, publicado_em)
@@ -108,6 +123,11 @@ do $$ begin
 exception when others then insert into resultado values ('fora não lê o funil', true, sqlerrm);
 end $$;
 insert into resultado select 'fora vê 0 vídeos do canal', count(*) = 0, count(*)::text from yt_videos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+do $$ begin
+  perform anonimizar_lead((select id from ids where nome = 'a'));
+  insert into resultado values ('fora não anonimiza lead', false, 'anonimizou');
+exception when others then insert into resultado values ('fora não anonimiza lead', true, sqlerrm);
+end $$;
 
 -- ── 2. equipe da PLATAFORMA ──
 set local request.jwt.claims = '{"sub":":plataforma","role":"authenticated"}';
@@ -249,6 +269,21 @@ do $$ begin
 exception when insufficient_privilege then insert into resultado values ('sessão não escreve no catálogo', true, sqlerrm);
 end $$;
 
+-- LGPD (0018): anonimizar a pedido da pessoa
+select anonimizar_lead((select id from ids where nome = 'a'));
+insert into resultado select 'anonimizar apaga o que identifica o lead',
+  nome = 'Anonimizado' and foto_url is null and telefone is null and autor_canal_id is null and notas = '' and anonimizado_em is not null and etapa = 'perdido',
+  nome || ' ' || etapa from leads where id = (select id from ids where nome = 'a');
+insert into resultado select 'comentário anonimizado e resposta cancelada',
+  texto like '[comentário anonimizado%' and autor_nome = 'Anonimizado' and autor_canal_id is null and resposta = 'ignorada' and rascunho = '[anonimizado]', resposta
+  from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
+insert into resultado select 'histórico do lead sem texto pessoal',
+  bool_and(texto in ('[anonimizado]', 'Dados pessoais anonimizados a pedido da pessoa (LGPD).') or tipo = 'etapa'), string_agg(texto, ' | ')
+  from lead_eventos where lead_id = (select id from ids where nome = 'a');
+insert into resultado select 'pauta perde o exemplo da pessoa', jsonb_array_length(exemplos) = 0, exemplos::text
+  from yt_pautas where id = '00000000-0000-4000-8000-0000000000a1';
+insert into resultado select 'anonimizar de novo não refaz', (anonimizar_lead((select id from ids where nome = 'a'))->>'ja_estava')::boolean, '';
+
 
 -- ── 3. anon ──
 set local role anon;
@@ -259,6 +294,20 @@ exception when insufficient_privilege then insert into resultado values ('anon n
 end $$;
 
 reset role;
+insert into resultado select 'auditoria sem o nome antigo do lead', count(*) = 0, count(*)::text from auditoria
+  where antes::text ilike '%maria%' and ((tabela = 'leads' and registro_id = (select id from ids where nome = 'a'))
+    or (tabela = 'lead_eventos' and registro_id in (select id from lead_eventos where lead_id = (select id from ids where nome = 'a'))));
+insert into resultado select 'pessoa anonimizada não volta a ser lida', count(*) = 1, count(*)::text from yt_bloqueados
+  where cliente_id = '00000000-0000-4000-8000-0000000000c2' and autor_hash = 'd7d77630deae2db23f9cf1e1e8831ae558cf68906b8fc5ef6749e7a8b56241c9';
+insert into resultado select 'auditoria de outro lead e do paciente intacta',
+  count(*) = (select count(*) from auditoria_retrato) and count(*) filter (where a.antes is distinct from r.antes) = 0
+  and bool_or(r.antes::text like '%João%') and bool_or(r.antes::text like '%Maria Paciente%'),
+  count(*)::text || ' linha(s)'
+  from auditoria_retrato r join auditoria a using (id);
+insert into resultado select 'paciente ligado ao lead não é anonimizado', nome = 'Maria Paciente S.', nome
+  from pacientes where id = '00000000-0000-4000-8000-0000000000b1';
+insert into resultado select 'auditoria prova quem anonimizou e quando', count(*) = 1, count(*)::text from auditoria
+  where tabela = 'leads' and registro_id = (select id from ids where nome = 'a') and 'anonimizado_em' = any(campos) and usuario_id = ':plataforma';
 -- a auditoria (LGPD) registrou o lead e a mudança de etapa
 insert into resultado select 'auditoria registrou o lead', count(*) >= 2, count(*)::text
   from auditoria where tabela = 'leads' and registro_id = (select id from ids where nome = 'a');

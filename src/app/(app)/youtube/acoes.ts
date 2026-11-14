@@ -197,3 +197,18 @@ export async function descartarPauta(pautaId: string): Promise<Resultado> {
   revalidatePath("/youtube");
   return { ok: true, msg: "Pauta descartada." };
 }
+
+/** LGPD: a pessoa pediu para apagar os dados. Só o administrador do cliente;
+ *  a função faz tudo de uma vez e bloqueia novas leituras (anonimizar_lead, 0018). */
+export async function anonimizarLead(leadId: string): Promise<Resultado> {
+  const supabase = await supabaseServidor();
+  const { data, error } = await supabase.rpc("anonimizar_lead", { p_lead: leadId });
+  if (error) return { ok: false, msg: error.message };
+  const r = (data ?? {}) as { ja_estava?: boolean; comentarios?: number; eventos?: number };
+  revalidatePath(`/youtube/leads/${leadId}`);
+  revalidatePath("/youtube");
+  return {
+    ok: true,
+    msg: r.ja_estava ? "Este lead já estava anonimizado." : `Lead anonimizado: ${r.comentarios ?? 0} comentário(s) e ${r.eventos ?? 0} registro(s) do histórico apagados no DashMed.`,
+  };
+}

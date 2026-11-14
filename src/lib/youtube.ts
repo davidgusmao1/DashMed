@@ -90,6 +90,8 @@ export type Lead = {
   autor_canal_id: string | null;
   criado_em: string;
   atualizado_em: string;
+  /** LGPD: dados pessoais apagados a pedido (0018) */
+  anonimizado_em?: string | null;
 };
 
 export type Varredura = {

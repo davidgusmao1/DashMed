@@ -4,6 +4,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import { dataHora } from "@/lib/conteudo";
 import { LINK_VIDEO, type Lead, ROTULO_CATEGORIA, TIPOS_EVENTO } from "@/lib/youtube";
+import Anonimizar from "./anonimizar";
 import Ficha from "./ficha";
 
 // Ficha do lead do YouTube Seller: quem é, o que comentou, o que respondemos
@@ -17,7 +18,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const supabase = await supabaseServidor();
   const { data: l } = await supabase.from("leads")
-    .select("id, cliente_id, nome, foto_url, codigo, etapa, etapa_em, probabilidade, procedimentos, local_interesse, telefone, notas, proximo_passo_em, responsavel_id, paciente_id, autor_canal_id, criado_em, atualizado_em")
+    .select("id, cliente_id, nome, foto_url, codigo, etapa, etapa_em, probabilidade, procedimentos, local_interesse, telefone, notas, proximo_passo_em, responsavel_id, paciente_id, autor_canal_id, criado_em, atualizado_em, anonimizado_em")
     .eq("id", id).is("deleted_at", null).maybeSingle();
   if (!l) notFound();
   const lead = l as Lead & { cliente_id: string };
@@ -30,6 +31,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
     lead.paciente_id ? supabase.from("pacientes").select("id, nome").eq("id", lead.paciente_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const nomes = new Map((usuarios ?? []).map((u) => [u.id as string, u.nome as string]));
+  const podeAnonimizar = eu.plataforma || (eu.papel === "admin" && eu.cliente_id === lead.cliente_id);
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -51,8 +53,15 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      {lead.anonimizado_em && (
+        <p className="cartao p-4 text-sm">Dados pessoais anonimizados a pedido da pessoa (LGPD) em {dataHora(lead.anonimizado_em)}. Novos comentários dela não são lidos.</p>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-        <Ficha lead={lead} usuarios={(usuarios ?? []) as { id: string; nome: string }[]} paciente={(paciente ?? null) as { id: string; nome: string } | null} />
+        <div className="space-y-4">
+          <Ficha lead={lead} usuarios={(usuarios ?? []) as { id: string; nome: string }[]} paciente={(paciente ?? null) as { id: string; nome: string } | null} />
+          {podeAnonimizar && !lead.anonimizado_em && <Anonimizar leadId={lead.id} codigo={lead.codigo} />}
+        </div>
 
         <div className="space-y-6">
           <section className="space-y-2">
