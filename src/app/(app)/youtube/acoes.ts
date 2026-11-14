@@ -133,3 +133,47 @@ export async function mudarTreino(id: string, campos: { ativo?: boolean; texto?:
   revalidatePath("/configuracoes");
   return { ok: true, msg: mudanca.ativo === false ? "Desativado: a IA deixa de usar." : mudanca.ativo ? "Reativado." : "Salvo." };
 }
+
+/** A secretária acha o lead pelo código que a pessoa disse no WhatsApp
+ *  ("YT1234", "yt 1234" ou só "1234") ou pelo nome (David, 14/11/26: código YT
+ *  na mão da secretária). */
+export async function buscarLeads(clienteId: string, termo: string): Promise<{ id: string; nome: string; codigo: string; etapa: string }[]> {
+  const t = termo.trim();
+  if (t.length < 2) return [];
+  const supabase = await supabaseServidor();
+  const codigo = t.replace(/\s+/g, "").match(/^(?:yt)?(\d{4})$/i);
+  let q = supabase.from("leads").select("id, nome, codigo, etapa").eq("cliente_id", clienteId).is("deleted_at", null);
+  q = codigo ? q.eq("codigo", `YT${codigo[1]}`) : q.ilike("nome", `%${t.replace(/[%_\\]/g, "")}%`);
+  const { data } = await q.order("atualizado_em", { ascending: false }).limit(8);
+  return (data ?? []) as { id: string; nome: string; codigo: string; etapa: string }[];
+}
+
+const MARCOS = {
+  contato: { etapa: "conversando", avanca: ["novo", "respondido"], tipo: "whatsapp", texto: "Entrou em contato (WhatsApp ou ligação) com o código." },
+  consulta: { etapa: "agendado", avanca: ["novo", "respondido", "conversando"], tipo: "consulta", texto: "Consulta agendada." },
+  tratamento: { etapa: "tratamento", avanca: ["novo", "respondido", "conversando", "agendado"], tipo: "nota", texto: "Fez o procedimento / iniciou o tratamento." },
+  perdido: { etapa: "perdido", avanca: ["novo", "respondido", "conversando", "agendado"], tipo: "nota", texto: "Não vai seguir." },
+} as const;
+export type Marco = keyof typeof MARCOS;
+
+/** Um clique da equipe: registra o que aconteceu e anda a etapa (só para a
+ *  frente: marcar "chamou" num lead já agendado não o faz voltar). */
+export async function marcarLead(leadId: string, marco: Marco, obs: string): Promise<Resultado & { etapa?: string }> {
+  const m = MARCOS[marco];
+  if (!m) return { ok: false, msg: "Marco desconhecido." };
+  const supabase = await supabaseServidor();
+  const { data: lead } = await supabase.from("leads").select("cliente_id, etapa").eq("id", leadId).maybeSingle();
+  if (!lead) return { ok: false, msg: "Lead não encontrado." };
+  const texto = obs.trim() ? `${m.texto} ${obs.trim()}` : m.texto;
+  const { error: e1 } = await supabase.from("lead_eventos").insert({ cliente_id: lead.cliente_id, lead_id: leadId, tipo: m.tipo, texto: texto.slice(0, 4000) });
+  if (e1) return { ok: false, msg: e1.message };
+  let etapa: string = lead.etapa;
+  if ((m.avanca as readonly string[]).includes(lead.etapa)) {
+    const { error: e2 } = await supabase.from("leads").update({ etapa: m.etapa }).eq("id", leadId);
+    if (e2) return { ok: false, msg: `Registrado no histórico, mas a etapa não mudou: ${e2.message}` };
+    etapa = m.etapa;
+  }
+  revalidatePath(`/youtube/leads/${leadId}`);
+  revalidatePath("/youtube");
+  return { ok: true, msg: etapa === lead.etapa ? "Registrado no histórico (a etapa já estava adiante)." : "Registrado e etapa atualizada.", etapa };
+}

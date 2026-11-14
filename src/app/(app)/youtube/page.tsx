@@ -4,8 +4,10 @@ import { dataHora } from "@/lib/conteudo";
 import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_CATEGORIA, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
 import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
+import BuscarLead from "./buscar-lead";
 import Fila from "./fila";
 import Quadro, { type CartaoLead } from "./quadro";
+import Resultados, { type Funil } from "./resultados";
 import Varrer from "./varrer";
 
 // YouTube Seller (David, 12/11/26: "um social seller automatizado"): o robô
@@ -16,6 +18,7 @@ const ABAS = [
   { id: "fila", rotulo: "Respostas para revisar" },
   { id: "leads", rotulo: "Leads (CRM)" },
   { id: "comentarios", rotulo: "Comentários lidos" },
+  { id: "resultados", rotulo: "Resultados" },
 ] as const;
 
 const RESPOSTA: Record<string, string> = {
@@ -76,6 +79,11 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       for (const c of cs ?? []) if (c.lead_id && !ultimo.has(c.lead_id)) ultimo.set(c.lead_id, c.texto);
     }
     conteudo = <Quadro leads={leads.map((l) => ({ ...l, ultimo_comentario: ultimo.get(l.id) ?? null })) as CartaoLead[]} />;
+  } else if (aba === "resultados") {
+    const { data, error } = await supabase.rpc("funil_youtube", { p_cliente: emFoco.id });
+    conteudo = error || !data
+      ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui montar o funil: {error?.message ?? "sem dados"}.</p>
+      : <Resultados funil={data as Funil} />;
   } else {
     const { data } = await supabase.from("yt_comentarios")
       .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id")
@@ -117,6 +125,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
             A IA lê e tria os comentários e escreve as respostas; você revisa e publica.
           </p>
         </div>
+        <BuscarLead clienteId={emFoco.id} />
       </div>
 
       {!pronto && (

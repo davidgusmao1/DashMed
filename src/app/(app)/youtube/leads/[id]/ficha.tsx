@@ -3,7 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ETAPAS, type Lead, LOCAIS } from "@/lib/youtube";
-import { buscarPacientes, moverLead, registrarEvento, salvarLead } from "../../acoes";
+import { buscarPacientes, type Marco, marcarLead, moverLead, registrarEvento, salvarLead } from "../../acoes";
+
+// Um clique da secretária quando a pessoa chama com o código (David, 14/11/26):
+// alimenta o funil de resultados (aba Resultados) sem precisar escrever nada.
+const MARCOS: [Marco, string][] = [
+  ["contato", "Chamou no WhatsApp / ligou"],
+  ["consulta", "Marcou consulta"],
+  ["tratamento", "Fez o procedimento"],
+  ["perdido", "Não vai seguir"],
+];
 
 export default function Ficha({ lead, usuarios, paciente }: {
   lead: Lead & { cliente_id: string };
@@ -109,6 +118,22 @@ export default function Ficha({ lead, usuarios, paciente }: {
           if (r.ok) router.refresh();
         })}>{pendente ? "Salvando…" : "Salvar ficha"}</button>
         {aviso && <p className={`rounded-lg px-3 py-2 text-sm ${aviso.ok ? "bg-teal-50 text-teal-900" : "bg-zinc-100 text-zinc-900"}`}>{aviso.texto}</p>}
+      </section>
+
+      <section className="cartao space-y-3 p-5">
+        <div>
+          <div className="text-sm font-semibold">A pessoa chamou com o código {lead.codigo}?</div>
+          <p className="text-xs text-zinc-500">Um clique registra no histórico e anda a etapa (nunca volta). Se escrever algo no campo abaixo, vai junto.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {MARCOS.map(([id, rot]) => (
+            <button key={id} type="button" className="botao-claro" disabled={pendente} onClick={() => iniciar(async () => {
+              const r = await marcarLead(lead.id, id, evTexto);
+              setAviso({ ok: r.ok, texto: r.msg });
+              if (r.ok) { if (r.etapa) setEtapa(r.etapa as Lead["etapa"]); setEvTexto(""); router.refresh(); }
+            })}>{rot}</button>
+          ))}
+        </div>
       </section>
 
       <section className="cartao space-y-3 p-5">
