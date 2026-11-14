@@ -1,4 +1,5 @@
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
+import AlertasYoutube from "./alertas-youtube";
 
 // Início em branco por enquanto: o cliente em foco e o estado da plataforma
 // (a edge function "saude" responde — Supabase, edge e Vercel ligados).
@@ -18,6 +19,7 @@ export default async function Inicio() {
             teste2 na tela principal"). Sai quando o teste acabar. */}
         <p className="mt-2 text-sm font-semibold text-teal-700">teste2</p>
       </div>
+      {emFoco && <AlertasYoutube clienteId={emFoco.id} />}
       <div className="cartao max-w-md p-5">
         <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">Plataforma</div>
         <div className="mt-2 flex items-center gap-2 text-sm">
