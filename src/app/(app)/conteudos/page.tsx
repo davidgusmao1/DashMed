@@ -51,6 +51,8 @@ export default async function Conteudos() {
       <div>
         <h1 className="text-2xl font-bold">Conteúdos para mídias sociais</h1>
         <p className="text-sm text-zinc-500">Assunto → referências médicas → roteiro de ~15 minutos → vídeo com o seu avatar.</p>
+        {/* atalho para as pautas tiradas das perguntas do YouTube (14/11/26) */}
+        <Link href="/youtube?aba=pautas" className="text-sm text-teal-700 underline">Sem assunto? Veja o que o público mais pergunta no YouTube</Link>
       </div>
       <NovoConteudo />
       <div className="space-y-2">

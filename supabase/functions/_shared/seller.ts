@@ -361,3 +361,90 @@ export async function aprenderComEdicoes(clienteId: string): Promise<{ propostas
   })).filter((p) => p.texto.length >= 3);
   return { propostas, analisadas: novas.length };
 }
+
+// ---------------------------------------------------------------------------
+// Pautas (David, 14/11/26: "perguntas frequentes viram pautas de conteúdo"):
+// a IA agrupa as perguntas dos comentários em temas de vídeo; o médico escolhe
+// quais viram conteúdo. Ficam em yt_pautas (0015).
+
+// categorias em que a pessoa pergunta algo que um vídeo pode responder
+const CATEGORIAS_PAUTA = ["duvida_geral", "sintoma", "tratamento", "pos_operatorio", "agendamento", "preco"];
+const MAX_COMENTARIOS_PAUTA = 220;
+
+const SISTEMA_PAUTAS = `Você ajuda um médico ortopedista (quadril) a decidir os próximos vídeos do canal dele no YouTube.
+Você recebe comentários reais do canal (q1, q2, ...), com as curtidas de cada um, e a lista de conteúdos que ele já fez ou já tem como pauta.
+Agrupe as PERGUNTAS e dúvidas que se repetem em temas de vídeo:
+- De 3 a 8 pautas, da que mais gente pergunta para a que menos. Só vira pauta o que aparece em mais de um comentário (ou num comentário com muitas curtidas).
+- titulo: o assunto do vídeo, claro e específico, como o público pergunta (ex.: "Quanto tempo depois da prótese de quadril posso dirigir?"). Até 120 caracteres. Sem promessa de resultado, sem preço.
+- porque: em uma ou duas frases, o que as pessoas querem saber e o que o vídeo precisa responder.
+- procedimento: o procedimento principal envolvido, se houver (ex.: "Prótese de quadril"); vazio se for geral.
+- comentarios: TODOS os identificadores (q1, q2...) que pedem este tema, os mais representativos primeiro.
+- Não repita tema que já está na lista de conteúdos e pautas existentes; um ângulo realmente diferente pode.
+- Ignore pedido de consulta sem dúvida nenhuma, elogio e reclamação.`;
+
+const ESQUEMA_PAUTAS = {
+  type: "object",
+  properties: {
+    pautas: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          titulo: { type: "string" }, porque: { type: "string" }, procedimento: { type: "string" },
+          comentarios: { type: "array", items: { type: "string" } },
+        },
+        required: ["titulo", "porque", "procedimento", "comentarios"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["pautas"],
+  additionalProperties: false,
+};
+
+export async function acharPautas(clienteId: string): Promise<{ pautas: number; analisados: number }> {
+  const { data } = await admin.from("yt_comentarios")
+    .select("id, texto, curtidas, procedimentos")
+    .eq("cliente_id", clienteId).eq("triagem", "feita").is("deleted_at", null)
+    .in("categoria", CATEGORIAS_PAUTA)
+    .order("publicado_em", { ascending: false }).limit(MAX_COMENTARIOS_PAUTA);
+  const comentarios = (data ?? []).filter((c) => String(c.texto).trim().length >= 15);
+  if (comentarios.length < 5) throw new Falha("Ainda há poucas perguntas triadas para achar pautas. Rode mais varreduras e volte aqui.", 409);
+
+  // o que já existe: conteúdos feitos e pautas que já viraram conteúdo
+  const [{ data: conteudos }, { data: usadas }] = await Promise.all([
+    admin.from("conteudos").select("assunto").eq("cliente_id", clienteId).is("deleted_at", null).order("criado_em", { ascending: false }).limit(60),
+    admin.from("yt_pautas").select("titulo").eq("cliente_id", clienteId).is("deleted_at", null).not("conteudo_id", "is", null).limit(60),
+  ]);
+  const existentes = [...(conteudos ?? []).map((c) => c.assunto), ...(usadas ?? []).map((p) => p.titulo)];
+
+  const pedido = comentarios.map((c, i) => `q${i + 1} (${c.curtidas ?? 0} curtida(s)): ${String(c.texto).replace(/\s+/g, " ").slice(0, 400)}`).join("\n");
+  const claude = await claudeDoCliente(clienteId, 110_000);
+  const r = await pedirJson<{ pautas: { titulo: string; porque: string; procedimento: string; comentarios: string[] }[] }>(claude, {
+    sistema: SISTEMA_PAUTAS,
+    pedido: `CONTEÚDOS E PAUTAS QUE JÁ EXISTEM:\n${existentes.length ? existentes.map((t) => `- ${t}`).join("\n") : "(nenhum)"}\n\nCOMENTÁRIOS:\n${pedido}`,
+    esquema: ESQUEMA_PAUTAS, esforco: "medium", maxTokens: 12000, timeoutMs: 105_000,
+  });
+
+  const linhas = (r.pautas ?? []).slice(0, 8).map((p) => {
+    const ids = [...new Set((p.comentarios ?? []).map((q) => Number(String(q).replace(/\D/g, "")) - 1))]
+      .filter((i) => i >= 0 && i < comentarios.length);
+    return {
+      cliente_id: clienteId,
+      titulo: String(p.titulo).trim().slice(0, 300),
+      porque: String(p.porque).trim().slice(0, 1000),
+      procedimento: String(p.procedimento ?? "").trim().slice(0, 120) || null,
+      comentarios: ids.length,
+      exemplos: ids.slice(0, 3).map((i) => ({ id: comentarios[i].id, texto: String(comentarios[i].texto).slice(0, 400) })),
+    };
+  }).filter((p) => p.titulo.length >= 3 && p.comentarios > 0);
+  if (!linhas.length) throw new Falha("A IA não achou perguntas que se repetem o bastante para virar pauta. Tente de novo depois de mais varreduras.", 409);
+
+  // só depois de a IA responder: arquiva as pautas antigas que não viraram conteúdo
+  const { error: e1 } = await admin.from("yt_pautas").update({ deleted_at: new Date().toISOString() })
+    .eq("cliente_id", clienteId).is("deleted_at", null).is("conteudo_id", null);
+  if (e1) throw new Falha(`Não consegui arquivar as pautas antigas (${e1.message}).`, 500);
+  const { error: e2 } = await admin.from("yt_pautas").insert(linhas);
+  if (e2) throw new Falha(`A IA achou as pautas, mas não consegui gravar (${e2.message}).`, 500);
+  return { pautas: linhas.length, analisados: comentarios.length };
+}

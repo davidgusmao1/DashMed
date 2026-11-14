@@ -7,6 +7,7 @@ import Atualizador from "./atualizador";
 import BuscarLead from "./buscar-lead";
 import Fila from "./fila";
 import FiltrosFila, { type ContagemFila, type FiltroFila } from "./filtros-fila";
+import Pautas, { type Pauta } from "./pautas";
 import Quadro, { type CartaoLead } from "./quadro";
 import Resultados, { type Funil } from "./resultados";
 import Varrer from "./varrer";
@@ -20,6 +21,7 @@ const ABAS = [
   { id: "leads", rotulo: "Leads (CRM)" },
   { id: "comentarios", rotulo: "Comentários lidos" },
   { id: "resultados", rotulo: "Resultados" },
+  { id: "pautas", rotulo: "Pautas de conteúdo" },
 ] as const;
 
 const RESPOSTA: Record<string, string> = {
@@ -116,6 +118,20 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       for (const c of cs ?? []) if (c.lead_id && !ultimo.has(c.lead_id)) ultimo.set(c.lead_id, c.texto);
     }
     conteudo = <Quadro leads={leads.map((l) => ({ ...l, ultimo_comentario: ultimo.get(l.id) ?? null })) as CartaoLead[]} />;
+  } else if (aba === "pautas") {
+    const { data } = await supabase.from("yt_pautas")
+      .select("id, titulo, porque, procedimento, comentarios, exemplos, conteudo_id, criado_em")
+      .eq("cliente_id", emFoco.id).is("deleted_at", null).order("comentarios", { ascending: false }).limit(60);
+    const pautas = data ?? [];
+    const idsEx = [...new Set(pautas.flatMap((p) => ((p.exemplos ?? []) as { id: string }[]).map((e) => e.id)))];
+    const { data: cs } = idsEx.length
+      ? await supabase.from("yt_comentarios").select("id, video_id, comentario_id").in("id", idsEx)
+      : { data: [] };
+    const link = new Map((cs ?? []).map((c) => [c.id, LINK_VIDEO(c.video_id, c.comentario_id)]));
+    conteudo = <Pautas clienteId={emFoco.id} pautas={pautas.map((p) => ({
+      ...p,
+      exemplos: ((p.exemplos ?? []) as { id: string; texto: string }[]).map((e) => ({ ...e, link: link.get(e.id) ?? null })),
+    })) as Pauta[]} />;
   } else if (aba === "resultados") {
     const { data, error } = await supabase.rpc("funil_youtube", { p_cliente: emFoco.id });
     conteudo = error || !data

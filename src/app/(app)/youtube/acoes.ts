@@ -177,3 +177,23 @@ export async function marcarLead(leadId: string, marco: Marco, obs: string): Pro
   revalidatePath("/youtube");
   return { ok: true, msg: etapa === lead.etapa ? "Registrado no histórico (a etapa já estava adiante)." : "Registrado e etapa atualizada.", etapa };
 }
+
+/** A pauta (perguntas frequentes dos comentários) vira um conteúdo em
+ *  Conteúdos; clique duplo devolve o mesmo conteúdo (criar_conteudo_da_pauta, 0015). */
+export async function criarConteudoDaPauta(pautaId: string): Promise<Resultado & { conteudoId?: string }> {
+  const supabase = await supabaseServidor();
+  const { data, error } = await supabase.rpc("criar_conteudo_da_pauta", { p_pauta: pautaId });
+  if (error) return { ok: false, msg: error.message };
+  revalidatePath("/youtube");
+  revalidatePath("/conteudos");
+  return { ok: true, msg: "Conteúdo criado.", conteudoId: data as string };
+}
+
+/** Tirar uma pauta da lista (fica arquivada, não é apagada — regra 6). */
+export async function descartarPauta(pautaId: string): Promise<Resultado> {
+  const supabase = await supabaseServidor();
+  const { error } = await supabase.rpc("descartar_pauta", { p_pauta: pautaId });
+  if (error) return { ok: false, msg: error.message };
+  revalidatePath("/youtube");
+  return { ok: true, msg: "Pauta descartada." };
+}

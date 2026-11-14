@@ -8,8 +8,10 @@
 //   - confere no YouTube se o canal já respondeu à mão (humano ganha — regra 4).
 //   Publicada a resposta, o lead vai para "respondido" e o histórico registra.
 // refazer: a IA escreve outra sugestão (com o pedido do médico, se houver).
+// aprender / pautas: a IA propõe (regras de treinamento, temas de vídeo); a
+//   equipe decide na tela o que fica.
 import { administra, admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
-import { aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
+import { acharPautas, aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
 import { canalConectado, canalJaRespondeu, gastarCota, publicarResposta, tokenDeAcesso } from "../_shared/youtube.ts";
 
 type Pedido = { acao?: string; comentario_id?: string; cliente_id?: string; texto?: string; instrucao?: string; sobrescrever?: boolean };
@@ -27,6 +29,15 @@ Deno.serve(async (req) => {
       if (!ehUuid(p.cliente_id)) throw new Falha("Cliente inválido.");
       if (!administra(eu, p.cliente_id)) throw new Falha("Só o administrador do cliente ou a equipe da plataforma treina a IA.", 403);
       return responder({ ok: true, ...(await aprenderComEdicoes(p.cliente_id)) });
+    }
+
+    // pautas (14/11/26): a IA agrupa as perguntas dos comentários em temas de
+    // vídeo; quem decide o que vira conteúdo é a equipe, na tela
+    if (p.acao === "pautas") {
+      if (!ehUuid(p.cliente_id)) throw new Falha("Cliente inválido.");
+      if (!enxerga(eu, p.cliente_id)) throw new Falha("Cliente não encontrado.", 404);
+      const r = await acharPautas(p.cliente_id);
+      return responder({ ok: true, mensagem: `${r.pautas} pauta(s) a partir de ${r.analisados} pergunta(s) dos comentários.` });
     }
 
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");

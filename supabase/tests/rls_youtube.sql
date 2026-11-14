@@ -41,6 +41,12 @@ insert into resultado select 'edição de verdade é reconhecida', editou_de_ver
 
 insert into seller_treinos (id, cliente_id, texto) values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000c2', 'Comece agradecendo a pergunta.');
 
+-- pautas de conteúdo (0015): duas pautas do cliente de teste
+insert into yt_pautas (id, cliente_id, titulo, porque, comentarios, exemplos) values
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000c2', 'Quando posso dirigir depois da prótese?', 'Muitos perguntam.', 3,
+   '[{"id":"00000000-0000-4000-8000-0000000000e1","texto":"Doutor, quando volto a dirigir?"}]'),
+  ('00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000c2', 'Ácido hialurônico dura quanto tempo?', '', 2, '[]');
+
 -- o mesmo comentário não entra duas vezes
 do $$ begin
   insert into yt_comentarios (cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, texto, publicado_em)
@@ -76,6 +82,22 @@ do $$ begin
   insert into seller_treinos (cliente_id, texto) values ('00000000-0000-4000-8000-0000000000c2', 'invasão');
   insert into resultado values ('fora não treina a IA', false, 'treinou');
 exception when others then insert into resultado values ('fora não treina a IA', true, sqlerrm);
+end $$;
+insert into resultado select 'fora vê 0 pautas', count(*) = 0, count(*)::text from yt_pautas where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+do $$ begin
+  perform criar_conteudo_da_pauta('00000000-0000-4000-8000-0000000000a1');
+  insert into resultado values ('fora não cria conteúdo da pauta', false, 'criou');
+exception when others then insert into resultado values ('fora não cria conteúdo da pauta', true, sqlerrm);
+end $$;
+do $$ begin
+  perform descartar_pauta('00000000-0000-4000-8000-0000000000a2');
+  insert into resultado values ('fora não descarta pauta', false, 'descartou');
+exception when others then insert into resultado values ('fora não descarta pauta', true, sqlerrm);
+end $$;
+do $$ begin
+  perform funil_youtube('00000000-0000-4000-8000-0000000000c2');
+  insert into resultado values ('fora não lê o funil', false, 'leu');
+exception when others then insert into resultado values ('fora não lê o funil', true, sqlerrm);
 end $$;
 
 -- ── 2. equipe da PLATAFORMA ──
@@ -183,6 +205,34 @@ do $$ begin
   insert into resultado values ('sessão não apaga treinamento', false, 'apagou');
 exception when insufficient_privilege then insert into resultado values ('sessão não apaga treinamento', true, sqlerrm);
 end $$;
+-- funil (0014) e pautas (0015)
+insert into resultado select 'plataforma lê o funil', (funil_youtube('00000000-0000-4000-8000-0000000000c2')->'totais'->>'leads')::int = 2, '';
+insert into ids select 'conteudo1', criar_conteudo_da_pauta('00000000-0000-4000-8000-0000000000a1');
+insert into ids select 'conteudo2', criar_conteudo_da_pauta('00000000-0000-4000-8000-0000000000a1');
+insert into resultado select 'pauta vira um só conteúdo (clique duplo)',
+  (select id from ids where nome = 'conteudo1') = (select id from ids where nome = 'conteudo2'), '';
+insert into resultado select 'conteúdo nasce com as perguntas reais', orientacoes like '%quando volto a dirigir%', left(orientacoes, 60)
+  from conteudos where id = (select id from ids where nome = 'conteudo1');
+insert into resultado select 'pauta aponta para o conteúdo', conteudo_id = (select id from ids where nome = 'conteudo1'), ''
+  from yt_pautas where id = '00000000-0000-4000-8000-0000000000a1';
+do $$ begin
+  insert into yt_pautas (cliente_id, titulo) values ('00000000-0000-4000-8000-0000000000c2', 'invasão');
+  insert into resultado values ('sessão não escreve pauta', false, 'escreveu');
+exception when insufficient_privilege then insert into resultado values ('sessão não escreve pauta', true, sqlerrm);
+end $$;
+do $$ begin
+  update yt_pautas set titulo = 'mudado' where id = '00000000-0000-4000-8000-0000000000a2';
+  insert into resultado values ('sessão não muda a pauta direto', false, 'mudou');
+exception when insufficient_privilege then insert into resultado values ('sessão não muda a pauta direto', true, sqlerrm);
+end $$;
+do $$ begin
+  perform descartar_pauta('00000000-0000-4000-8000-0000000000a1');
+  insert into resultado values ('pauta que virou conteúdo não é descartada', false, 'descartou');
+exception when others then insert into resultado values ('pauta que virou conteúdo não é descartada', true, sqlerrm);
+end $$;
+select descartar_pauta('00000000-0000-4000-8000-0000000000a2');
+insert into resultado select 'pauta descartada some da lista', count(*) = 1, count(*)::text from yt_pautas where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+
 
 -- ── 3. anon ──
 set local role anon;
