@@ -2,6 +2,7 @@ import Link from "next/link";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import { dataHora } from "@/lib/conteudo";
 import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_CATEGORIA, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
+import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
 import Fila from "./fila";
 import Quadro, { type CartaoLead } from "./quadro";
@@ -45,7 +46,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
   let conteudo: React.ReactNode = null;
   if (aba === "fila") {
     const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, resposta_msg, publicada_em, lead_id")
+      .select("id, comentario_id, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id")
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null)
       .order("urgente", { ascending: false }).order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false }).limit(40);
     const lista = (data ?? []) as Comentario[];
@@ -120,6 +121,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       )}
 
       {tem("youtube") && <Varrer clienteId={emFoco.id} v={v} podeVarrer={pronto} />}
+      {r && <AprenderEdicoes clienteId={emFoco.id} edicoesNovas={r.edicoes_novas ?? 0} podeTreinar={eu.plataforma || (eu.papel === "admin" && eu.cliente_id === emFoco.id)} />}
 
       {r && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">

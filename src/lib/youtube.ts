@@ -61,6 +61,7 @@ export type Comentario = {
   resposta: "nenhuma" | "redigir" | "rascunho" | "publicando" | "publicada" | "falhou" | "ignorada";
   rascunho: string | null;
   rascunho_editado: boolean;
+  sugestao_ia: string | null;
   resposta_msg: string | null;
   publicada_em: string | null;
   lead_id: string | null;
@@ -107,6 +108,7 @@ export type Resumo = {
   publicadas_hoje: number;
   leads: number;
   cota_hoje: number;
+  edicoes_novas: number;
 };
 
 export type SellerConfig = {
@@ -125,3 +127,11 @@ export const LINK_VIDEO = (videoId: string, comentarioId?: string) =>
   `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}${comentarioId ? `&lc=${encodeURIComponent(comentarioId)}` : ""}`;
 
 export const REDIRECT_OAUTH = "https://yjwhhkzqmsouvnryiwde.supabase.co/functions/v1/youtube-oauth";
+
+/** O médico mudou a resposta de verdade (não só espaço ou maiúscula)? A mesma
+ *  regra de editou_de_verdade() no banco (0012). */
+export function editouDeVerdade(sugestao: string | null | undefined, publicado: string | null | undefined): boolean {
+  if (sugestao == null || publicado == null) return false;
+  const norma = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  return norma(sugestao) !== norma(publicado);
+}

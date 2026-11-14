@@ -1,6 +1,6 @@
 // Regras de texto do YouTube Seller (12/11/26). Roda em segundos:
 //   deno run --allow-read supabase/tests/youtube.ts
-import { garantirCodigo, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink } from "../functions/_shared/texto.ts";
+import { editouDeVerdade, garantirCodigo, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink } from "../functions/_shared/texto.ts";
 
 let falhas = 0;
 function confere(nome: string, ok: boolean, detalhe = "") {
@@ -40,6 +40,11 @@ confere("resposta vazia é recusada", problemaNaResposta("ok", config) !== null)
 confere("resposta com link é recusada", (problemaNaResposta("Veja mais em https://site.com, é um bom resumo do tema.", config) ?? "").includes("link"));
 confere("resposta com telefone inventado é recusada", (problemaNaResposta("Agende pelo telefone (21) 91234-5678, nossa equipe ajuda.", config) ?? "").includes("telefone"));
 confere("resposta longa demais é recusada", (problemaNaResposta("a ".repeat(600), config) ?? "").includes("caracteres"));
+
+// aprender com as edições: só conta mudança de verdade
+confere("espaço e maiúscula não contam como edição", !editouDeVerdade("Olá, Maria!  Tudo bem?", "olá, maria! tudo bem?"));
+confere("texto trocado conta como edição", editouDeVerdade("Agende pelo WhatsApp.", "Agende pela secretária no WhatsApp."));
+confere("sem sugestão guardada não conta", !editouDeVerdade(null, "qualquer coisa"));
 
 if (falhas) {
   console.error(`\n${falhas} regra(s) falharam.`);

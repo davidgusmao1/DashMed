@@ -5,7 +5,7 @@
 // das configurações (conferido em problemaNaResposta).
 import { admin, carregarPerfil, Falha, perfilEmTexto } from "./base.ts";
 import { claudeDoCliente, pedirJson } from "./claude.ts";
-import { garantirCodigo, LIMITE_RESPOSTA, problemaNaResposta } from "./texto.ts";
+import { editouDeVerdade, garantirCodigo, LIMITE_RESPOSTA, problemaNaResposta } from "./texto.ts";
 
 export type Config = {
   automatico: boolean;
@@ -239,7 +239,9 @@ export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redi
     if (r.problema) problemas++;
     else ok++;
     const { error } = await admin.from("yt_comentarios").update({
-      rascunho: r.texto, rascunho_editado: false, resposta: r.problema ? "falhou" : "rascunho", resposta_msg: r.problema,
+      // sugestao_ia guarda o que a IA escreveu, para comparar com o que o
+      // médico publicar (aprender com as edições, 0012)
+      rascunho: r.texto, sugestao_ia: r.texto, rascunho_editado: false, resposta: r.problema ? "falhou" : "rascunho", resposta_msg: r.problema,
     }).eq("id", it.id);
     if (error) throw new Falha(`Não consegui gravar a resposta sugerida (${error.message}).`, 500);
   }
@@ -262,4 +264,75 @@ export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; l
     procedimentos: l.procedimentos ?? [], urgente: !!l.urgente, resumo: l.resumo, codigo: l.lead_id ? codigo.get(l.lead_id) ?? "" : "",
     lead_id: l.lead_id ?? null,
   }));
+}
+
+// ── aprender com as edições (David, 14/11/26) ───────────────────────────
+// A IA compara o que ela sugeriu com o que o médico publicou depois de editar,
+// procura PADRÕES e propõe regras. Nada vira treinamento sem ele aprovar.
+export type Proposta = { texto: string; motivo: string; exemplos: { comentario: string; sugestao: string; publicado: string }[] };
+
+const SISTEMA_APRENDER = `Você ajuda a IA que escreve as respostas do canal do YouTube de um médico a aprender o jeito dele.
+Para cada caso (c1, c2, ...) você recebe o comentário, a resposta que a IA sugeriu e a resposta que o médico PUBLICOU depois de editar.
+Encontre PADRÕES nas edições — o que ele acrescenta, corta ou troca, o tom, o tamanho, a ordem, o que oferece ou deixa de oferecer, palavras que evita — e transforme em regras gerais para as próximas respostas.
+- De 0 a 5 regras. Cada regra é uma instrução curta e direta, no imperativo, que sirva para qualquer comentário parecido, não só para aquele caso.
+- Prefira o que se repete em mais de um caso; uma edição isolada só vira regra se for claramente uma preferência geral (por exemplo, nunca usar certa palavra).
+- Ignore correção de digitação e ajustes que só valem para aquele caso (um fato da pessoa, um nome).
+- Não repita o que já está nos treinamentos ativos (lista abaixo). Se as edições contradizem um treinamento ativo, proponha a regra nova e diga no motivo qual ela substitui.
+- Nunca proponha regra que quebre as regras do CFM (prometer resultado, falar de preço, diagnosticar pelo comentário, desmerecer colegas) ou que traga telefone, endereço ou preço.
+- motivo: o que você viu nas edições, em uma frase. casos: os identificadores (c1, c2...) que mostram o padrão.
+Se não houver padrão claro, devolva a lista vazia.`;
+
+const ESQUEMA_APRENDER = {
+  type: "object",
+  properties: {
+    regras: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { texto: { type: "string" }, motivo: { type: "string" }, casos: { type: "array", items: { type: "string" } } },
+        required: ["texto", "motivo", "casos"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["regras"],
+  additionalProperties: false,
+};
+
+/** Analisa as edições novas (e algumas já vistas, para dar contexto), marca as
+ *  novas como analisadas e devolve as regras propostas. */
+export async function aprenderComEdicoes(clienteId: string): Promise<{ propostas: Proposta[]; analisadas: number }> {
+  const { data } = await admin.from("yt_comentarios")
+    .select("id, texto, sugestao_ia, rascunho, aprendido_em, publicada_em")
+    .eq("cliente_id", clienteId).eq("resposta", "publicada").is("deleted_at", null).not("sugestao_ia", "is", null)
+    .order("publicada_em", { ascending: false }).limit(60);
+  const editadas = (data ?? []).filter((c) => editouDeVerdade(c.sugestao_ia, c.rascunho));
+  const novas = editadas.filter((c) => !c.aprendido_em).slice(0, 20);
+  if (!novas.length) throw new Falha("Não há edições novas para analisar. Edite e publique algumas respostas e volte aqui.", 409);
+  // até 10 já analisadas entram como contexto: padrão que se repete ao longo do tempo
+  const contexto = editadas.filter((c) => c.aprendido_em).slice(0, 10);
+  const casos = [...novas, ...contexto];
+  const treinos = await carregarTreinos(clienteId);
+  const pedido = casos.map((c, i) => [
+    `c${i + 1}`,
+    `COMENTÁRIO: ${String(c.texto).slice(0, 800)}`,
+    `SUGESTÃO DA IA: ${c.sugestao_ia}`,
+    `PUBLICADO PELO MÉDICO: ${c.rascunho}`,
+  ].join("\n")).join("\n\n");
+  const claude = await claudeDoCliente(clienteId, 110_000);
+  const r = await pedirJson<{ regras: { texto: string; motivo: string; casos: string[] }[] }>(claude, {
+    sistema: SISTEMA_APRENDER,
+    pedido: `TREINAMENTOS ATIVOS:\n${treinos || "(nenhum)"}\n\nCASOS:\n\n${pedido}`,
+    esquema: ESQUEMA_APRENDER, esforco: "medium", maxTokens: 16000, timeoutMs: 105_000,
+  });
+  const agora = new Date().toISOString();
+  const { error } = await admin.from("yt_comentarios").update({ aprendido_em: agora }).in("id", novas.map((c) => c.id));
+  if (error) throw new Falha(`Analisei, mas não consegui marcar as edições como vistas (${error.message}).`, 500);
+  const propostas = (r.regras ?? []).slice(0, 5).map((regra) => ({
+    texto: String(regra.texto).trim().slice(0, 600),
+    motivo: String(regra.motivo).trim().slice(0, 400),
+    exemplos: (regra.casos ?? []).map((id) => casos[Number(String(id).replace(/\D/g, "")) - 1]).filter(Boolean).slice(0, 2)
+      .map((c) => ({ comentario: String(c.texto).slice(0, 300), sugestao: c.sugestao_ia as string, publicado: c.rascunho as string })),
+  })).filter((p) => p.texto.length >= 3);
+  return { propostas, analisadas: novas.length };
 }

@@ -107,7 +107,7 @@ export async function buscarPacientes(clienteId: string, termo: string): Promise
 /** Treinamento da IA (David, 12/11/26). Fica gravado até ser desativado; os
  *  ativos entram em toda triagem e resposta nova. A RLS decide quem pode
  *  (admin do cliente ou plataforma: a voz da resposta é a do médico). */
-export async function salvarTreino(clienteId: string, texto: string, origem: "texto" | "voz", comentarioId: string | null): Promise<Resultado> {
+export async function salvarTreino(clienteId: string, texto: string, origem: "texto" | "voz" | "edicao", comentarioId: string | null): Promise<Resultado> {
   const t = texto.trim();
   if (t.length < 3) return { ok: false, msg: "Escreva (ou fale) o que a IA deve aprender." };
   if (t.length > 2000) return { ok: false, msg: "Treinamento longo demais (até 2.000 caracteres). Divida em mais de um." };

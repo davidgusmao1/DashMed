@@ -9,7 +9,7 @@ import { useState } from "react";
 import { ExternalLink, GraduationCap, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
-import { type Comentario, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
+import { type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
 import { ignorarResposta, salvarRascunho } from "./acoes";
 import JanelaTreino from "./treino";
 
@@ -42,7 +42,9 @@ function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string
     const r = await chamarFuncao<{ mensagem: string }>("youtube-responder", { acao: "publicar", comentario_id: c.id, texto });
     setOcupado(null);
     setModo("ver");
-    setAviso(r.ok ? { ok: true, texto: r.dados.mensagem } : { ok: false, texto: r.erro });
+    // publicou diferente do que a IA sugeriu: vira material para ela aprender
+    const aprende = r.ok && editouDeVerdade(c.sugestao_ia, texto);
+    setAviso(r.ok ? { ok: true, texto: aprende ? `${r.dados.mensagem} Você editou o texto: ele entra em "Aprender com minhas edições", no topo da página.` : r.dados.mensagem } : { ok: false, texto: r.erro });
     router.refresh();
   }
 

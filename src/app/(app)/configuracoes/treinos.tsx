@@ -12,7 +12,7 @@ import { mudarTreino } from "../youtube/acoes";
 import CampoVoz from "../youtube/campo-voz";
 import JanelaTreino from "../youtube/treino";
 
-export type Treino = { id: string; texto: string; origem: "texto" | "voz"; ativo: boolean; criado_em: string; autor: string | null; do_comentario: boolean };
+export type Treino = { id: string; texto: string; origem: "texto" | "voz" | "edicao"; ativo: boolean; criado_em: string; autor: string | null; do_comentario: boolean };
 
 function Linha({ t, podeEditar }: { t: Treino; podeEditar: boolean }) {
   const router = useRouter();
@@ -33,6 +33,7 @@ function Linha({ t, podeEditar }: { t: Treino; podeEditar: boolean }) {
         <span>{dataHora(t.criado_em)}</span>
         {t.autor && <span>· {t.autor}</span>}
         {t.origem === "voz" && <span className="inline-flex items-center gap-1">· <Mic size={11} /> por voz</span>}
+        {t.origem === "edicao" && <span>· aprendido das suas edições</span>}
         {t.do_comentario && <span>· feito num comentário</span>}
         {!t.ativo && <span className="font-semibold text-zinc-700">· desativado</span>}
       </div>

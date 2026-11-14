@@ -33,6 +33,12 @@ insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, 
          'Doutor, quanto custa a prótese?', now(), 'feita', 80, 'rascunho', 'Oi, Maria!', id from ids where nome = 'a';
 insert into lead_eventos (cliente_id, lead_id, tipo, texto) select '00000000-0000-4000-8000-0000000000c2', id, 'comentario', 'comentou' from ids where nome = 'a';
 
+-- uma resposta publicada que o médico editou (aprender com as edições, 0012)
+insert into yt_comentarios (cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, texto, publicado_em, triagem, resposta, sugestao_ia, rascunho, publicada_em)
+  values ('00000000-0000-4000-8000-0000000000c2', 'UCteste', 'th2', 'cm2', 'v1', 'João', 'Atende convênio?', now(), 'feita', 'publicada',
+          'Olá! Agende pelo WhatsApp.', 'Olá, João! Atendo particular. Agende pelo WhatsApp com a secretária.', now());
+insert into resultado select 'edição de verdade é reconhecida', editou_de_verdade('Olá! Agende.', 'Olá, João! Agende com a secretária.') and not editou_de_verdade('Olá!  Agende.', 'olá! agende.'), '';
+
 insert into seller_treinos (id, cliente_id, texto) values ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000c2', 'Comece agradecendo a pergunta.');
 
 -- o mesmo comentário não entra duas vezes
@@ -75,7 +81,7 @@ end $$;
 -- ── 2. equipe da PLATAFORMA ──
 set local request.jwt.claims = '{"sub":":plataforma","role":"authenticated"}';
 insert into resultado select 'plataforma vê os 2 leads', count(*) = 2, count(*)::text from leads where cliente_id = '00000000-0000-4000-8000-0000000000c2';
-insert into resultado select 'plataforma vê o comentário', count(*) = 1, count(*)::text from yt_comentarios where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+insert into resultado select 'plataforma vê o comentário', count(*) = 1, count(*)::text from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
 insert into resultado select 'plataforma lê o resumo', (resumo_youtube('00000000-0000-4000-8000-0000000000c2')->>'leads')::int = 2, '';
 do $$ begin
   update yt_comentarios set rascunho = 'Oi, Maria! Editado.', rascunho_editado = true, resposta = 'rascunho' where id = '00000000-0000-4000-8000-0000000000e1';
@@ -140,7 +146,24 @@ do $$ begin
 exception when insufficient_privilege then insert into resultado values ('sessão não mexe na varredura', true, sqlerrm);
 end $$;
 
-insert into resultado select 'plataforma vê o treinamento', count(*) = 1, count(*)::text from seller_treinos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+insert into resultado select 'resumo conta 1 edição nova', (resumo_youtube('00000000-0000-4000-8000-0000000000c2')->>'edicoes_novas')::int = 1,
+  resumo_youtube('00000000-0000-4000-8000-0000000000c2')->>'edicoes_novas';
+do $$ begin
+  update yt_comentarios set sugestao_ia = 'troquei' where id = '00000000-0000-4000-8000-0000000000e1';
+  insert into resultado values ('sessão não altera a sugestão original da IA', false, 'alterou');
+exception when insufficient_privilege then insert into resultado values ('sessão não altera a sugestão original da IA', true, sqlerrm);
+end $$;
+do $$ begin
+  update yt_comentarios set aprendido_em = now() where id = '00000000-0000-4000-8000-0000000000e1';
+  insert into resultado values ('sessão não marca edição como analisada', false, 'marcou');
+exception when insufficient_privilege then insert into resultado values ('sessão não marca edição como analisada', true, sqlerrm);
+end $$;
+do $$ begin
+  insert into seller_treinos (cliente_id, texto, origem) values ('00000000-0000-4000-8000-0000000000c2', 'Diga que atende particular.', 'edicao');
+  insert into resultado values ('plataforma salva regra aprendida das edições', true, '');
+exception when others then insert into resultado values ('plataforma salva regra aprendida das edições', false, sqlerrm);
+end $$;
+insert into resultado select 'plataforma vê o treinamento', count(*) = 1, count(*)::text from seller_treinos where id = '00000000-0000-4000-8000-0000000000f1';
 do $$ begin
   insert into seller_treinos (cliente_id, texto, origem) values ('00000000-0000-4000-8000-0000000000c2', 'Não fale de SUS.', 'voz');
   insert into resultado values ('plataforma treina a IA (voz)', true, '');

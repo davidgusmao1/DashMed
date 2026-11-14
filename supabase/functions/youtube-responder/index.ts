@@ -8,11 +8,11 @@
 //   - confere no YouTube se o canal já respondeu à mão (humano ganha — regra 4).
 //   Publicada a resposta, o lead vai para "respondido" e o histórico registra.
 // refazer: a IA escreve outra sugestão (com o pedido do médico, se houver).
-import { admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
-import { carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
+import { administra, admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
+import { aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
 import { canalConectado, canalJaRespondeu, gastarCota, publicarResposta, tokenDeAcesso } from "../_shared/youtube.ts";
 
-type Pedido = { acao?: string; comentario_id?: string; texto?: string; instrucao?: string; sobrescrever?: boolean };
+type Pedido = { acao?: string; comentario_id?: string; cliente_id?: string; texto?: string; instrucao?: string; sobrescrever?: boolean };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -20,6 +20,15 @@ Deno.serve(async (req) => {
     if (req.method !== "POST") throw new Falha("Use POST.", 405);
     const eu = await quemPediu(req);
     const p = await corpoJson<Pedido>(req);
+
+    // aprender com as edições (14/11/26): a IA PROPÕE regras; quem salva como
+    // treinamento é o médico, na tela
+    if (p.acao === "aprender") {
+      if (!ehUuid(p.cliente_id)) throw new Falha("Cliente inválido.");
+      if (!administra(eu, p.cliente_id)) throw new Falha("Só o administrador do cliente ou a equipe da plataforma treina a IA.", 403);
+      return responder({ ok: true, ...(await aprenderComEdicoes(p.cliente_id)) });
+    }
+
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");
     const { data: c } = await admin.from("yt_comentarios")
       .select("id, cliente_id, comentario_id, resposta, rascunho, rascunho_editado, lead_id, pode_responder")

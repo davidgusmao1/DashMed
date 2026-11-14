@@ -226,3 +226,11 @@ export function problemaNaResposta(resposta: string, configuracao: string[]): st
   if (inventados.length) return `A IA escreveu um telefone que não está nas suas configurações (${inventados.join(", ")}).`;
   return null;
 }
+
+/** O médico mudou a resposta de verdade (não só espaço ou maiúscula)? A mesma
+ *  regra da função editou_de_verdade() do banco (0012). */
+export function editouDeVerdade(sugestao: string | null | undefined, publicado: string | null | undefined): boolean {
+  if (sugestao == null || publicado == null) return false;
+  const norma = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  return norma(sugestao) !== norma(publicado);
+}
