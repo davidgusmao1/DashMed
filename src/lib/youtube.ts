@@ -65,6 +65,8 @@ export type Comentario = {
   rascunho: string | null;
   rascunho_editado: boolean;
   sugestao_ia: string | null;
+  /** vídeo do canal que a IA indicou na resposta (0017) */
+  video_sugerido?: string | null;
   resposta_msg: string | null;
   publicada_em: string | null;
   lead_id: string | null;

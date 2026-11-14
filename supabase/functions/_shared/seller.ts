@@ -6,7 +6,7 @@
 import { admin, carregarPerfil, Falha, perfilEmTexto } from "./base.ts";
 import { claudeDoCliente, pedirJson } from "./claude.ts";
 import { canalConectado, gastarCota, mensagensDaConversa, tokenDeAcesso } from "./youtube.ts";
-import { editouDeVerdade, garantirCodigo, LIMITE_RESPOSTA, problemaNaResposta } from "./texto.ts";
+import { editouDeVerdade, garantirCodigo, LIMITE_RESPOSTA, problemaNaResposta, type VideoCatalogo, videosParecidos } from "./texto.ts";
 
 export type Config = {
   automatico: boolean;
@@ -151,6 +151,8 @@ export type ParaRedigir = {
   /** continuação de conversa: a linha de topo e a conversa até aqui */
   conversa_de: string | null;
   conversa: string | null;
+  /** vídeos do canal que podem responder à dúvida (pré-seleção de videosParecidos) */
+  videos: VideoCatalogo[];
 };
 
 const REGRAS_CFM = `Regras da Resolução CFM 2.336/2023 que toda resposta cumpre:
@@ -175,6 +177,7 @@ Cada resposta:
 - quando sugerir a estimativa de custo de um tratamento, use o telefone de estimativa;
 - elogio ou agradecimento sem pergunta: agradeça em uma ou duas frases, sem oferta;
 - cada resposta é escrita para aquele comentário: não repita a mesma abertura nem o mesmo fechamento entre as respostas do lote;
+- quando o item trouxer VÍDEOS DO CANAL e um deles responder bem à dúvida da pessoa, indique UM, pelo título entre aspas, numa frase curta (ex.: 'Tenho um vídeo no canal sobre isso: "Título"'); encurte o título tirando o nome do médico, emojis e número de episódio; nunca ponha link; se nenhum servir de verdade, não indique (video = 0). Em continuação de conversa, só indique se a pessoa pediu mais informação;
 - quando o item trouxer CONVERSA ATÉ AQUI, é a continuação de uma conversa em que você já respondeu: responda só à NOVA MENSAGEM, sem se apresentar de novo e sem repetir a oferta inteira; retome só o que a pessoa pediu agora (por exemplo, o telefone de orçamento com o código).
 
 Opções de atendimento configuradas:
@@ -186,7 +189,7 @@ ${c.instrucoes.trim() ? `\nInstruções do médico: ${c.instrucoes.trim()}\n` : 
 ${REGRAS_CFM}${blocoTreino(treinos, "resposta")}`;
 }
 
-export type Redigido = { texto: string; problema: string | null };
+export type Redigido = { texto: string; problema: string | null; video_id: string | null };
 
 export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config, instrucao?: string): Promise<Map<string, Redigido>> {
   const [perfil, treinos] = await Promise.all([carregarPerfil(clienteId), carregarTreinos(clienteId)]);
@@ -198,8 +201,9 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
         type: "array",
         items: {
           type: "object",
-          properties: { id: { type: "string" }, texto: { type: "string" } },
-          required: ["id", "texto"],
+          // video: o número do vídeo indicado na lista do item (0 = nenhum)
+          properties: { id: { type: "string" }, texto: { type: "string" }, video: { type: "integer" } },
+          required: ["id", "texto", "video"],
           additionalProperties: false,
         },
       },
@@ -211,8 +215,9 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
     `c${i + 1} | código ${x.codigo} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}`,
     `triagem: ${x.categoria ?? "?"}${x.urgente ? " | URGENTE" : ""}${x.procedimentos.length ? ` | ${x.procedimentos.join(", ")}` : ""}${x.resumo ? ` | ${x.resumo}` : ""}`,
     x.conversa ? `CONVERSA ATÉ AQUI:\n${x.conversa}\nNOVA MENSAGEM (responda a esta): ${x.texto.slice(0, 2000)}` : `comentário: ${x.texto.slice(0, 2000)}`,
-  ].join("\n")).join("\n\n");
-  const r = await pedirJson<{ respostas: { id: string; texto: string }[] }>(claude, {
+    x.videos.length ? `VÍDEOS DO CANAL: ${x.videos.map((v, j) => `${j + 1}) "${v.titulo}"`).join(" | ")}` : null,
+  ].filter(Boolean).join("\n")).join("\n\n");
+  const r = await pedirJson<{ respostas: { id: string; texto: string; video?: number }[] }>(claude, {
     sistema: sistemaResposta(c, perfilEmTexto(perfil), treinos),
     pedido: `${instrucao ? `Pedido do médico para esta versão: ${instrucao}\n\n` : ""}COMENTÁRIOS:\n\n${pedido}`,
     esquema, esforco: "medium", maxTokens: 16000, timeoutMs: 110_000,
@@ -224,7 +229,8 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
     const item = itens[i];
     if (!item) continue;
     const texto = garantirCodigo(String(x.texto ?? ""), item.codigo);
-    mapa.set(item.id, { texto, problema: problemaNaResposta(texto, configurados) });
+    const video = item.videos[Number(x.video ?? 0) - 1] ?? null;
+    mapa.set(item.id, { texto, problema: problemaNaResposta(texto, configurados), video_id: video?.video_id ?? null });
   }
   return mapa;
 }
@@ -247,6 +253,7 @@ export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redi
       // sugestao_ia guarda o que a IA escreveu, para comparar com o que o
       // médico publicar (aprender com as edições, 0012)
       rascunho: r.texto, sugestao_ia: r.texto, rascunho_editado: false, resposta: r.problema ? "falhou" : "rascunho", resposta_msg: r.problema,
+      video_sugerido: r.video_id,
     }).eq("id", it.id);
     if (error) throw new Falha(`Não consegui gravar a resposta sugerida (${error.message}).`, 500);
   }
@@ -256,7 +263,7 @@ export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redi
 /** Os comentários a redigir, com o código do lead de cada um. */
 export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; limite: number }): Promise<ParaRedigir[]> {
   let q = admin.from("yt_comentarios")
-    .select("id, texto, autor_nome, video_titulo, categoria, procedimentos, urgente, resumo, lead_id, conversa_de, comentario_id, publicado_em")
+    .select("id, texto, autor_nome, video_id, video_titulo, categoria, procedimentos, urgente, resumo, lead_id, conversa_de, comentario_id, publicado_em")
     .eq("cliente_id", filtro.clienteId).is("deleted_at", null);
   q = filtro.ids ? q.in("id", filtro.ids) : q.eq("resposta", "redigir").order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false });
   const { data } = await q.limit(filtro.limite);
@@ -264,6 +271,10 @@ export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; l
   const leadIds = [...new Set(linhas.map((l) => l.lead_id).filter(Boolean))] as string[];
   const { data: leads } = leadIds.length ? await admin.from("leads").select("id, codigo").in("id", leadIds) : { data: [] };
   const codigo = new Map((leads ?? []).map((l) => [l.id as string, l.codigo as string]));
+  // catálogo de vídeos do canal (0017), para a resposta poder indicar um
+  const { data: catalogo } = linhas.length
+    ? await admin.from("yt_videos").select("video_id, titulo, descricao").eq("cliente_id", filtro.clienteId).is("deleted_at", null).limit(1000)
+    : { data: [] };
   // continuação de conversa: a conversa até a mensagem, lida no YouTube na hora
   // (fonte da verdade: inclui o que o médico respondeu direto no YouTube)
   const conversas = new Map<string, string>();
@@ -288,6 +299,7 @@ export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; l
     id: l.id, texto: l.texto, autor_nome: l.autor_nome, video_titulo: l.video_titulo, categoria: l.categoria,
     procedimentos: l.procedimentos ?? [], urgente: !!l.urgente, resumo: l.resumo, codigo: l.lead_id ? codigo.get(l.lead_id) ?? "" : "",
     lead_id: l.lead_id ?? null, conversa_de: l.conversa_de ?? null, conversa: conversas.get(l.id) ?? null,
+    videos: videosParecidos([l.texto, l.resumo ?? "", ...(l.procedimentos ?? [])].join(" "), (catalogo ?? []) as VideoCatalogo[], l.video_id),
   }));
 }
 

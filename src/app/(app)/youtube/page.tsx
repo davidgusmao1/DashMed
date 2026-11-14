@@ -75,7 +75,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       video: video && vids.has(video) ? video : "",
     };
     let q = supabase.from("yt_comentarios")
-      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id", { count: "exact" })
+      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido", { count: "exact" })
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null);
     if (filtro.f === "urgente") q = q.eq("urgente", true);
     if (filtro.f === "conversa") q = q.not("conversa_de", "is", null);
@@ -96,11 +96,17 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       comentario: t.texto as string,
       resposta: t.resposta === "publicada" ? (t.rascunho as string | null) : t.ja_respondido ? "(você respondeu direto no YouTube)" : null,
     }]));
+    // o vídeo do canal que a IA indicou em cada resposta (0017)
+    const vidIds = [...new Set(lista.map((c) => c.video_sugerido).filter(Boolean))] as string[];
+    const { data: vids2 } = vidIds.length
+      ? await supabase.from("yt_videos").select("video_id, titulo").eq("cliente_id", emFoco.id).in("video_id", vidIds)
+      : { data: [] };
+    const titulosVideos = Object.fromEntries((vids2 ?? []).map((v) => [v.video_id, v.titulo as string]));
     conteudo = (
       <div className="space-y-3">
         {contagem.total > 0 && <FiltrosFila contagem={contagem} filtro={filtro} />}
         <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} conversas={conversas}
-          filtrada={!!(filtro.f || filtro.proc || filtro.video)} />
+          titulosVideos={titulosVideos} filtrada={!!(filtro.f || filtro.proc || filtro.video)} />
         {(count ?? 0) > lista.length && <p className="text-xs text-zinc-500">Mostrando {lista.length} de {count}. As próximas aparecem conforme estas forem publicadas ou ignoradas.</p>}
       </div>
     );

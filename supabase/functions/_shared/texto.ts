@@ -246,3 +246,42 @@ export function mensagensDepoisDoCanal<T extends { autor_canal_id: string | null
   if (!ultima) return [];
   return msgs.filter((m) => m.autor_canal_id !== canalId && m.publicado_em > ultima && m.texto.trim() !== "");
 }
+
+// ── vídeo do canal para indicar na resposta (14/11/26) ─────────────────
+// Pré-seleção barata, sem IA: as palavras raras que o comentário divide com o
+// título (e um pouco com a descrição) de cada vídeo. Palavra que aparece em
+// quase todo título ("quadril") pesa pouco; rara ("luxação") pesa muito. A IA
+// escolhe entre os 5 melhores, ou nenhum.
+const PARADAS = new Set(["para", "como", "porque", "quando", "depois", "antes", "muito", "mais", "isso", "esse", "essa", "este", "esta", "tenho", "fazer", "doutor", "voce", "voces", "minha", "meu", "sobre", "pode", "posso", "estou", "ainda", "tambem", "entao", "qual", "quais", "aqui", "dele", "dela", "nao", "sim", "obrigado", "obrigada", "boa", "bom", "tarde", "noite", "gusmao", "david", "davi"]);
+
+export function palavrasChave(texto: string): Set<string> {
+  const limpo = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const ps = limpo.split(/[^a-z0-9]+/).filter((p) => p.length >= 4 && !PARADAS.has(p) && !/^\d+$/.test(p));
+  // plural simples: "proteses" e "protese" contam como a mesma palavra
+  return new Set(ps.map((p) => (p.length > 4 && p.endsWith("s") ? p.slice(0, -1) : p)));
+}
+
+export type VideoCatalogo = { video_id: string; titulo: string; descricao: string };
+
+export function videosParecidos(texto: string, catalogo: VideoCatalogo[], excluir: string | null, n = 5): VideoCatalogo[] {
+  if (!catalogo.length) return [];
+  const doc = catalogo.map((v) => ({ v, titulo: palavrasChave(v.titulo), descricao: palavrasChave(v.descricao) }));
+  const df = new Map<string, number>();
+  for (const d of doc) for (const p of new Set([...d.titulo, ...d.descricao])) df.set(p, (df.get(p) ?? 0) + 1);
+  const idf = (p: string) => Math.log((catalogo.length + 1) / ((df.get(p) ?? 0) + 0.5));
+  const alvo = palavrasChave(texto);
+  return doc
+    .filter((d) => d.v.video_id !== excluir)
+    .map((d) => {
+      let nota = 0;
+      for (const p of alvo) {
+        if (d.titulo.has(p)) nota += idf(p);
+        else if (d.descricao.has(p)) nota += 0.3 * idf(p);
+      }
+      return { v: d.v, nota };
+    })
+    .filter((x) => x.nota >= 2)
+    .sort((a, b) => b.nota - a.nota)
+    .slice(0, n)
+    .map((x) => x.v);
+}

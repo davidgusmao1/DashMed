@@ -254,3 +254,35 @@ export async function revogar(refresh: string): Promise<void> {
     });
   } catch { /* o token sai do cofre de qualquer jeito */ }
 }
+
+export type VideoDoCanal = { video_id: string; titulo: string; descricao: string; publicado_em: string | null };
+
+/** Os vídeos públicos do canal, pela playlist de uploads (sugerir vídeo nas
+ *  respostas, 14/11/26). 1 unidade para achar a playlist + 1 por página de 50;
+ *  devolve também quantas unidades gastou. Até 20 páginas (1.000 vídeos). */
+export async function videosDoCanal(token: string, canalId: string): Promise<{ videos: VideoDoCanal[]; unidades: number }> {
+  const c = await yt<{ items?: { contentDetails?: { relatedPlaylists?: { uploads?: string } } }[] }>(token, `/channels?part=contentDetails&id=${encodeURIComponent(canalId)}`);
+  const uploads = c.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) throw new Falha("Não achei a lista de vídeos do canal no YouTube.", 409);
+  const videos: VideoDoCanal[] = [];
+  let unidades = 1;
+  let pagina: string | null = null;
+  for (let i = 0; i < 20; i++) {
+    const q = new URLSearchParams({ part: "snippet,contentDetails,status", maxResults: "50", playlistId: uploads });
+    if (pagina) q.set("pageToken", pagina);
+    const r = await yt<{
+      nextPageToken?: string;
+      items?: { snippet: { title: string; description?: string; resourceId?: { videoId?: string } }; contentDetails?: { videoId?: string; videoPublishedAt?: string }; status?: { privacyStatus?: string } }[];
+    }>(token, `/playlistItems?${q}`);
+    unidades++;
+    for (const it of r.items ?? []) {
+      const id = it.contentDetails?.videoId ?? it.snippet.resourceId?.videoId;
+      // privado, não listado ou apagado não se sugere a ninguém
+      if (!id || it.status?.privacyStatus !== "public") continue;
+      videos.push({ video_id: id, titulo: it.snippet.title, descricao: (it.snippet.description ?? "").slice(0, 400), publicado_em: it.contentDetails?.videoPublishedAt ?? null });
+    }
+    pagina = r.nextPageToken ?? null;
+    if (!pagina) break;
+  }
+  return { videos, unidades };
+}

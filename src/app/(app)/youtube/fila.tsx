@@ -26,11 +26,11 @@ const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type PropsCartao = {
   c: Comentario; codigo: string | null; canal: string; clienteId: string; conversa: Conversa | null;
-  semConfirmar: boolean; selecionado: boolean; travado: boolean;
+  videoIndicado: string | null; semConfirmar: boolean; selecionado: boolean; travado: boolean;
   aoSelecionar: (sim: boolean) => void; aoMudarTexto: (texto: string) => void;
 };
 
-function Cartao({ c, codigo, canal, clienteId, conversa, semConfirmar, selecionado, travado, aoSelecionar, aoMudarTexto }: PropsCartao) {
+function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfirmar, selecionado, travado, aoSelecionar, aoMudarTexto }: PropsCartao) {
   const router = useRouter();
   const [texto, setTexto] = useState(c.rascunho ?? "");
   const [editado, setEditado] = useState(false);
@@ -144,6 +144,15 @@ function Cartao({ c, codigo, canal, clienteId, conversa, semConfirmar, seleciona
         <textarea id={`r-${c.id}`} className="campo leading-relaxed" rows={5} value={texto} disabled={parado}
           onChange={(e) => { setTexto(e.target.value); setEditado(true); }} />
         <div className="text-xs text-zinc-400">{texto.length} caracteres</div>
+        {c.video_sugerido && (
+          <p className="mt-1 text-xs text-zinc-600">
+            A IA indicou o vídeo do canal{" "}
+            <a href={LINK_VIDEO(c.video_sugerido)} target="_blank" rel="noreferrer" className="underline">
+              {videoIndicado ?? c.video_sugerido} <ExternalLink size={10} className="inline" />
+            </a>{" "}
+            — confira se responde à dúvida antes de publicar.
+          </p>
+        )}
       </div>
 
       {modo === "confirmar" && (
@@ -199,8 +208,9 @@ function Cartao({ c, codigo, canal, clienteId, conversa, semConfirmar, seleciona
 
 type Lote = { total: number; feitos: number; ok: number; falhas: string[]; andando: boolean; parouNoLimite: boolean };
 
-export default function Fila({ comentarios, codigos, canal, clienteId, conversas, filtrada = false }: {
-  comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string; conversas: Record<string, Conversa>; filtrada?: boolean;
+export default function Fila({ comentarios, codigos, canal, clienteId, conversas, titulosVideos = {}, filtrada = false }: {
+  comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string; conversas: Record<string, Conversa>;
+  titulosVideos?: Record<string, string>; filtrada?: boolean;
 }) {
   const router = useRouter();
   const textos = useRef<Record<string, string>>({});
@@ -282,7 +292,7 @@ export default function Fila({ comentarios, codigos, canal, clienteId, conversas
         {comentarios.map((c) => (
           <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId}
             conversa={c.conversa_de ? conversas[c.conversa_de] ?? null : null}
-            semConfirmar={semConfirmar} selecionado={marcados.has(c.id)} travado={andando}
+            videoIndicado={c.video_sugerido ? titulosVideos[c.video_sugerido] ?? null : null} semConfirmar={semConfirmar} selecionado={marcados.has(c.id)} travado={andando}
             aoSelecionar={(sim) => marcar(c.id, sim)} aoMudarTexto={(t) => { textos.current[c.id] = t; }} />
         ))}
       </ul>

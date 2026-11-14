@@ -2,7 +2,7 @@
 // começando pelos comentários mais recentes aos mais antigos").
 //
 // Um passo por execução (o relógio da edge é curto), encadeados:
-//   ler_novos → triar (lotes de 40) → redigir (lotes de 6) → ler_historico → ...
+//   ler_novos → [videos, 1x/dia] → conversas → triar (lotes de 40) → redigir (lotes de 6) → ler_historico → ...
 // - ler_novos: do topo até o comentário mais novo já lido;
 // - ler_historico: a próxima página para trás, guardada em historico_token;
 // - triar: a IA dá probabilidade, procedimento, urgência; quem qualifica vira
@@ -19,7 +19,7 @@ import {
   responder, respostaDeErro,
 } from "../_shared/base.ts";
 import { type Avaliacao, carregarConfig, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
-import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, titulosDosVideos, tokenDeAcesso, type ComentarioLido } from "../_shared/youtube.ts";
+import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, titulosDosVideos, tokenDeAcesso, type ComentarioLido, videosDoCanal } from "../_shared/youtube.ts";
 import { mensagensDepoisDoCanal } from "../_shared/texto.ts";
 
 const MAX_PASSOS = 16;
@@ -28,6 +28,8 @@ const LOTE_REDACAO = 6;
 const PAGINAS_NOVOS = 5;
 const PAGINAS_HISTORICO = 3;
 const CONVERSAS_POR_PASSO = 30;
+// catálogo de vídeos do canal (para a resposta sugerir um): relido 1x por dia
+const CATALOGO_VALE_MS = 24 * 3600_000;
 
 function iguais(a: string, b: string): boolean {
   if (!a || a.length !== b.length) return false;
@@ -45,6 +47,7 @@ type Varredura = {
   historico_token: string | null;
   historico_completo: boolean;
   lidos_total: number;
+  videos_em: string | null;
 };
 
 async function contar(clienteId: string, campo: "triagem" | "resposta", valor: string): Promise<number> {
@@ -263,6 +266,31 @@ async function passoRedigir(clienteId: string): Promise<string> {
   return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}${juntados ? `; ${juntados} de quem já tem resposta` : ""}.`;
 }
 
+/** Relê os vídeos públicos do canal: novos entram, os que saíram são
+ *  arquivados (deleted_at), os que voltaram reaparecem. */
+async function atualizarCatalogo(clienteId: string, canalId: string, token: string): Promise<string> {
+  // reserva a cota antes (1.000 vídeos = 21 unidades no máximo)
+  await gastarCota(clienteId, 21);
+  const { videos } = await videosDoCanal(token, canalId);
+  const agora = new Date().toISOString();
+  for (let i = 0; i < videos.length; i += 200) {
+    const { error } = await admin.from("yt_videos").upsert(
+      videos.slice(i, i + 200).map((v) => ({ cliente_id: clienteId, ...v, visto_em: agora, deleted_at: null })),
+      { onConflict: "cliente_id,video_id" },
+    );
+    if (error) throw new Falha(`Não consegui gravar a lista de vídeos (${error.message}).`, 500);
+  }
+  // só arquiva quando a leitura veio inteira: lista vazia é mais provável erro do que canal sem vídeo
+  let arquivados = 0;
+  if (videos.length) {
+    const { data } = await admin.from("yt_videos").update({ deleted_at: agora })
+      .eq("cliente_id", clienteId).is("deleted_at", null).lt("visto_em", agora).select("id");
+    arquivados = data?.length ?? 0;
+  }
+  await admin.from("yt_varreduras").update({ videos_em: agora }).eq("cliente_id", clienteId);
+  return `Lista de vídeos do canal atualizada: ${videos.length} público(s)${arquivados ? `, ${arquivados} saíram` : ""}.`;
+}
+
 /** Um passo da rodada e o disparo do seguinte. */
 async function passo(clienteId: string): Promise<void> {
   const { data } = await admin.from("yt_varreduras").select("*").eq("cliente_id", clienteId).maybeSingle();
@@ -275,10 +303,11 @@ async function passo(clienteId: string): Promise<void> {
     }
     const atual = v.passo ?? "ler_novos";
     let msg: string;
-    if (atual === "ler_novos" || atual === "ler_historico" || atual === "conversas") {
+    if (atual === "ler_novos" || atual === "ler_historico" || atual === "conversas" || atual === "videos") {
       const token = await tokenDeAcesso(clienteId);
       msg = atual === "ler_novos" ? await lerNovos(v, canal.canal_id, token)
         : atual === "conversas" ? await lerConversas(clienteId, canal.canal_id, token)
+        : atual === "videos" ? await atualizarCatalogo(clienteId, canal.canal_id, token)
         : await lerHistorico(v, canal.canal_id, token);
     } else if (atual === "triar") {
       msg = await passoTriar(clienteId);
@@ -290,7 +319,9 @@ async function passo(clienteId: string): Promise<void> {
     // então avançar no histórico
     const { data: depois } = await admin.from("yt_varreduras").select("historico_token, historico_completo").eq("cliente_id", clienteId).single();
     let proximo: string | null = null;
-    if (atual === "ler_novos") proximo = "conversas";
+    const catalogoVelho = !v.videos_em || Date.now() - Date.parse(v.videos_em) > CATALOGO_VALE_MS;
+    if (atual === "ler_novos") proximo = catalogoVelho ? "videos" : "conversas";
+    else if (atual === "videos") proximo = "conversas";
     else if (await contar(clienteId, "triagem", "pendente")) proximo = "triar";
     else if (await contar(clienteId, "resposta", "redigir")) proximo = "redigir";
     else if (!depois?.historico_completo && depois?.historico_token) proximo = "ler_historico";

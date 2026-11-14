@@ -47,6 +47,14 @@ insert into yt_pautas (id, cliente_id, titulo, porque, comentarios, exemplos) va
    '[{"id":"00000000-0000-4000-8000-0000000000e1","texto":"Doutor, quando volto a dirigir?"}]'),
   ('00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000c2', 'Ácido hialurônico dura quanto tempo?', '', 2, '[]');
 
+-- catálogo de vídeos do canal (0017)
+insert into yt_videos (cliente_id, video_id, titulo) values ('00000000-0000-4000-8000-0000000000c2', 'v1', 'Prótese de quadril: quando posso dirigir?');
+do $$ begin
+  insert into yt_videos (cliente_id, video_id, titulo) values ('00000000-0000-4000-8000-0000000000c2', 'v1', 'repetido');
+  insert into resultado values ('vídeo repetido é recusado', false, 'entrou');
+exception when unique_violation then insert into resultado values ('vídeo repetido é recusado', true, '');
+end $$;
+
 -- o mesmo comentário não entra duas vezes
 do $$ begin
   insert into yt_comentarios (cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, texto, publicado_em)
@@ -99,6 +107,7 @@ do $$ begin
   insert into resultado values ('fora não lê o funil', false, 'leu');
 exception when others then insert into resultado values ('fora não lê o funil', true, sqlerrm);
 end $$;
+insert into resultado select 'fora vê 0 vídeos do canal', count(*) = 0, count(*)::text from yt_videos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
 
 -- ── 2. equipe da PLATAFORMA ──
 set local request.jwt.claims = '{"sub":":plataforma","role":"authenticated"}';
@@ -232,6 +241,13 @@ exception when others then insert into resultado values ('pauta que virou conte�
 end $$;
 select descartar_pauta('00000000-0000-4000-8000-0000000000a2');
 insert into resultado select 'pauta descartada some da lista', count(*) = 1, count(*)::text from yt_pautas where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+
+insert into resultado select 'plataforma vê o vídeo do canal', count(*) = 1, count(*)::text from yt_videos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
+do $$ begin
+  insert into yt_videos (cliente_id, video_id, titulo) values ('00000000-0000-4000-8000-0000000000c2', 'v9', 'invasão');
+  insert into resultado values ('sessão não escreve no catálogo', false, 'escreveu');
+exception when insufficient_privilege then insert into resultado values ('sessão não escreve no catálogo', true, sqlerrm);
+end $$;
 
 
 -- ── 3. anon ──

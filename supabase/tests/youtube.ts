@@ -1,6 +1,6 @@
 // Regras de texto do YouTube Seller (12/11/26). Roda em segundos:
 //   deno run --allow-read supabase/tests/youtube.ts
-import { editouDeVerdade, garantirCodigo, mensagensDepoisDoCanal, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink } from "../functions/_shared/texto.ts";
+import { editouDeVerdade, garantirCodigo, mensagensDepoisDoCanal, palavrasChave, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink, videosParecidos } from "../functions/_shared/texto.ts";
 
 let falhas = 0;
 function confere(nome: string, ok: boolean, detalhe = "") {
@@ -59,6 +59,23 @@ confere("pega as mensagens depois da resposta do canal", novasConversa.length ==
 confere("mensagem vazia não conta", !novasConversa.some((m) => !m.texto.trim()));
 confere("canal respondeu por último: nada a seguir", mensagensDepoisDoCanal([...conversa.slice(0, 4), { autor_canal_id: "UCcanal", publicado_em: "2026-11-04T10:00:00Z", texto: "ok" }], "UCcanal").length === 0);
 confere("canal nunca respondeu: nada a seguir", mensagensDepoisDoCanal([conversa[0], conversa[2]], "UCcanal").length === 0);
+
+// vídeo do canal para indicar (14/11/26)
+const catalogo = [
+  { video_id: "v1", titulo: "Prótese de quadril: quando posso dirigir? | Dr. David Gusmão", descricao: "" },
+  { video_id: "v2", titulo: "Luxação da prótese de quadril: como evitar", descricao: "" },
+  { video_id: "v3", titulo: "Artrose do quadril: exercícios que ajudam", descricao: "fisioterapia e musculação" },
+  { video_id: "v4", titulo: "Ácido hialurônico no quadril funciona?", descricao: "" },
+  { video_id: "v5", titulo: "Quarta do Quadril #219 - dúvidas sobre o quadril", descricao: "" },
+];
+confere("palavras: sem acento, sem plural, sem palavra vazia", [...palavrasChave("Próteses de QUADRIL, doutor")].join(",") === "protese,quadril");
+const dirigir = videosParecidos("Operei a prótese faz 1 mês, quando vou poder dirigir de novo?", catalogo, null);
+confere("acha o vídeo do assunto (dirigir)", dirigir[0]?.video_id === "v1", dirigir.map((v) => v.video_id).join(","));
+const luxou = videosParecidos("Tenho medo da prótese sair do lugar, luxação acontece muito?", catalogo, null);
+confere("palavra rara pesa mais (luxação)", luxou[0]?.video_id === "v2", luxou.map((v) => v.video_id).join(","));
+confere("não indica o vídeo em que a pessoa está comentando", !videosParecidos("quando posso dirigir depois da prótese", catalogo, "v1").some((v) => v.video_id === "v1"));
+confere("palavra comum sozinha não basta (só 'quadril')", videosParecidos("Bom dia, meu quadril dói", catalogo, null).length === 0);
+confere("catálogo vazio não quebra", videosParecidos("qualquer coisa", [], null).length === 0);
 
 if (falhas) {
   console.error(`\n${falhas} regra(s) falharam.`);
