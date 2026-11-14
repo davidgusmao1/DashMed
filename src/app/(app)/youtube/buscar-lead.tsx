@@ -26,7 +26,7 @@ export default function BuscarLead({ clienteId }: { clienteId: string }) {
     <form className="relative w-full sm:w-72" onSubmit={(e) => { e.preventDefault(); if (achados?.length === 1) router.push(`/youtube/leads/${achados[0].id}`); }}>
       <label htmlFor="buscar-lead" className="sr-only">Buscar lead pelo código ou nome</label>
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-      <input id="buscar-lead" className="campo pl-9" placeholder="Código (YT1234) ou nome" value={termo} onChange={(e) => buscar(e.target.value)} autoComplete="off" />
+      <input id="buscar-lead" type="search" data-1p-ignore className="campo pl-9" placeholder="Código (YT1234) ou nome" value={termo} onChange={(e) => buscar(e.target.value)} autoComplete="off" />
       {achados && (
         <ul className="absolute z-20 mt-1 w-full divide-y divide-zinc-100 overflow-hidden rounded-lg border border-zinc-200 bg-white text-sm shadow-lg">
           {achados.length === 0 && <li className="px-3 py-2 text-zinc-500">Nenhum lead com esse código ou nome.</li>}

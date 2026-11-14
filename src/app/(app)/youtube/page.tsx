@@ -6,6 +6,7 @@ import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
 import BuscarLead from "./buscar-lead";
 import Fila from "./fila";
+import FiltrosFila, { type ContagemFila, type FiltroFila } from "./filtros-fila";
 import Quadro, { type CartaoLead } from "./quadro";
 import Resultados, { type Funil } from "./resultados";
 import Varrer from "./varrer";
@@ -26,12 +27,12 @@ const RESPOSTA: Record<string, string> = {
   publicada: "respondido", falhou: "na fila (problema)", ignorada: "ignorado",
 };
 
-export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<{ aba?: string }> }) {
+export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<{ aba?: string; f?: string; proc?: string; video?: string }> }) {
   const eu = await usuarioAtual();
   if (!eu) return null;
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
-  const { aba: abaPedida } = await searchParams;
+  const { aba: abaPedida, f, proc, video } = await searchParams;
   const aba = ABAS.some((a) => a.id === abaPedida) ? abaPedida! : "fila";
   const supabase = await supabaseServidor();
 
@@ -48,9 +49,38 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
 
   let conteudo: React.ReactNode = null;
   if (aba === "fila") {
-    const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id")
-      .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null)
+    // a fila inteira, leve, só para contar os filtros (fila passa de 1.000? então já é outro problema)
+    const { data: toda } = await supabase.from("yt_comentarios").select("urgente, conversa_de, procedimentos, video_id, video_titulo")
+      .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null).limit(1000);
+    const procs = new Map<string, number>();
+    const vids = new Map<string, { id: string; titulo: string; n: number }>();
+    for (const c of toda ?? []) {
+      for (const pr of (c.procedimentos ?? []) as string[]) procs.set(pr, (procs.get(pr) ?? 0) + 1);
+      const v = vids.get(c.video_id) ?? { id: c.video_id, titulo: c.video_titulo ?? c.video_id, n: 0 };
+      v.n++;
+      vids.set(c.video_id, v);
+    }
+    const contagem: ContagemFila = {
+      total: (toda ?? []).length,
+      urgentes: (toda ?? []).filter((c) => c.urgente).length,
+      conversas: (toda ?? []).filter((c) => c.conversa_de).length,
+      procedimentos: [...procs].sort((a, b) => b[1] - a[1]),
+      videos: [...vids.values()].sort((a, b) => b.n - a.n),
+    };
+    const filtro: FiltroFila = {
+      f: f === "urgente" || f === "conversa" ? f : "",
+      proc: proc && procs.has(proc) ? proc : "",
+      video: video && vids.has(video) ? video : "",
+    };
+    let q = supabase.from("yt_comentarios")
+      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id", { count: "exact" })
+      .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null);
+    if (filtro.f === "urgente") q = q.eq("urgente", true);
+    if (filtro.f === "conversa") q = q.not("conversa_de", "is", null);
+    // literal de array com aspas: o nome do procedimento tem espaço e parênteses
+    if (filtro.proc) q = q.filter("procedimentos", "cs", `{"${filtro.proc.replace(/["\\]/g, "\\$&")}"}`);
+    if (filtro.video) q = q.eq("video_id", filtro.video);
+    const { data, count } = await q
       .order("urgente", { ascending: false }).order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false }).limit(40);
     const lista = (data ?? []) as Comentario[];
     const ids = [...new Set(lista.map((c) => c.lead_id).filter(Boolean))] as string[];
@@ -64,7 +94,14 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       comentario: t.texto as string,
       resposta: t.resposta === "publicada" ? (t.rascunho as string | null) : t.ja_respondido ? "(você respondeu direto no YouTube)" : null,
     }]));
-    conteudo = <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} conversas={conversas} />;
+    conteudo = (
+      <div className="space-y-3">
+        {contagem.total > 0 && <FiltrosFila contagem={contagem} filtro={filtro} />}
+        <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} conversas={conversas}
+          filtrada={!!(filtro.f || filtro.proc || filtro.video)} />
+        {(count ?? 0) > lista.length && <p className="text-xs text-zinc-500">Mostrando {lista.length} de {count}. As próximas aparecem conforme estas forem publicadas ou ignoradas.</p>}
+      </div>
+    );
   } else if (aba === "leads") {
     const { data } = await supabase.from("leads")
       .select("id, nome, foto_url, codigo, etapa, probabilidade, procedimentos, proximo_passo_em, atualizado_em, paciente_id")

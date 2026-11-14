@@ -5,8 +5,8 @@
 // tenha a palavra final — e a resposta sai no nome dele).
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { ExternalLink, GraduationCap, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ExternalLink, GraduationCap, ListChecks, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
 import { type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
@@ -15,7 +15,22 @@ import JanelaTreino from "./treino";
 
 type Conversa = { comentario: string; resposta: string | null };
 
-function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codigo: string | null; canal: string; clienteId: string; conversa: Conversa | null }) {
+// Revisão mais rápida (David, 14/11/26): publicar sem a pergunta de
+// confirmação é escolha de quem revisa, guardada só neste navegador.
+const CHAVE_SEM_CONFIRMAR = "dashmed:youtube:publicar-sem-confirmar";
+// No lote, uma por vez e com folga entre elas: rajada de respostas é o que o
+// filtro de spam do YouTube procura. O limite diário continua valendo no servidor.
+const INTERVALO_LOTE_MS = 4000;
+const MAXIMO_LOTE = 20;
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type PropsCartao = {
+  c: Comentario; codigo: string | null; canal: string; clienteId: string; conversa: Conversa | null;
+  semConfirmar: boolean; selecionado: boolean; travado: boolean;
+  aoSelecionar: (sim: boolean) => void; aoMudarTexto: (texto: string) => void;
+};
+
+function Cartao({ c, codigo, canal, clienteId, conversa, semConfirmar, selecionado, travado, aoSelecionar, aoMudarTexto }: PropsCartao) {
   const router = useRouter();
   const [texto, setTexto] = useState(c.rascunho ?? "");
   const [editado, setEditado] = useState(false);
@@ -25,6 +40,9 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
   const [treinando, setTreinando] = useState(false);
+
+  // o lote publica o texto que está na tela, editado ou não
+  useEffect(() => { aoMudarTexto(texto); }, [texto, aoMudarTexto]);
 
   /** depois de salvar um treinamento: refaz esta resposta já com ele */
   async function refazerComTreino(refazerAgora: boolean, trocar: boolean) {
@@ -80,8 +98,9 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
   }
 
   const jaEditado = c.rascunho_editado || editado;
+  const parado = !!ocupado || travado;
   return (
-    <li className="cartao space-y-3 p-4">
+    <li className={`cartao space-y-3 p-4 ${selecionado ? "ring-2 ring-teal-600" : ""}`}>
       <div className="flex items-start gap-3">
         {c.autor_foto_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -96,6 +115,10 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
             {c.conversa_de && <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white">continuação da conversa</span>}
             {c.procedimentos.map((p) => <span key={p} className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700">{p}</span>)}
             {codigo && c.lead_id && <Link href={`/youtube/leads/${c.lead_id}`} className="text-xs text-zinc-500 underline">lead {codigo}</Link>}
+            <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-zinc-600">
+              <input type="checkbox" className="size-4 accent-teal-700" checked={selecionado} disabled={travado} onChange={(e) => aoSelecionar(e.target.checked)} />
+              Selecionar
+            </label>
           </div>
           <div className="text-xs text-zinc-400">
             {dataHora(c.publicado_em)} · <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="hover:underline">{c.video_titulo ?? "vídeo"} <ExternalLink size={10} className="inline" /></a>
@@ -118,7 +141,7 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
 
       <div>
         <label className="rotulo" htmlFor={`r-${c.id}`}>Resposta {jaEditado ? "(editada por você)" : "sugerida pela IA"}</label>
-        <textarea id={`r-${c.id}`} className="campo leading-relaxed" rows={5} value={texto} disabled={!!ocupado}
+        <textarea id={`r-${c.id}`} className="campo leading-relaxed" rows={5} value={texto} disabled={parado}
           onChange={(e) => { setTexto(e.target.value); setEditado(true); }} />
         <div className="text-xs text-zinc-400">{texto.length} caracteres</div>
       </div>
@@ -154,11 +177,13 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
 
       {modo === "ver" && (
         <div className="flex flex-wrap gap-2">
-          <button className="botao" onClick={() => setModo("confirmar")} disabled={!!ocupado || texto.trim().length < 2}><Send size={14} /> Publicar</button>
-          {editado && <button className="botao-claro" onClick={guardar} disabled={!!ocupado}>{ocupado === "salvar" ? "Salvando…" : "Salvar rascunho"}</button>}
-          <button className="botao-claro" onClick={() => setModo("refazer")} disabled={!!ocupado}><Sparkles size={14} /> Refazer com a IA</button>
-          <button className="botao-claro" onClick={ignorar} disabled={!!ocupado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
-          <button className="botao-claro" onClick={() => setTreinando(true)} disabled={!!ocupado}><GraduationCap size={14} /> Treinamento da IA</button>
+          <button className="botao" onClick={() => (semConfirmar ? publicar() : setModo("confirmar"))} disabled={parado || texto.trim().length < 2}>
+            {ocupado === "publicar" ? <><LoaderCircle size={14} className="animate-spin" /> Publicando…</> : <><Send size={14} /> Publicar</>}
+          </button>
+          {editado && <button className="botao-claro" onClick={guardar} disabled={parado}>{ocupado === "salvar" ? "Salvando…" : "Salvar rascunho"}</button>}
+          <button className="botao-claro" onClick={() => setModo("refazer")} disabled={parado}><Sparkles size={14} /> Refazer com a IA</button>
+          <button className="botao-claro" onClick={ignorar} disabled={parado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
+          <button className="botao-claro" onClick={() => setTreinando(true)} disabled={parado}><GraduationCap size={14} /> Treinamento da IA</button>
           <a href={LINK_VIDEO(c.video_id, c.conversa_de ? c.thread_id : c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro"><ExternalLink size={14} /> Ver no YouTube</a>
         </div>
       )}
@@ -172,15 +197,114 @@ function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codi
   );
 }
 
-export default function Fila({ comentarios, codigos, canal, clienteId, conversas }: {
-  comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string; conversas: Record<string, Conversa>;
+type Lote = { total: number; feitos: number; ok: number; falhas: string[]; andando: boolean; parouNoLimite: boolean };
+
+export default function Fila({ comentarios, codigos, canal, clienteId, conversas, filtrada = false }: {
+  comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string; conversas: Record<string, Conversa>; filtrada?: boolean;
 }) {
+  const router = useRouter();
+  const textos = useRef<Record<string, string>>({});
+  const [marcados, setMarcados] = useState<Set<string>>(new Set());
+  const [semConfirmar, setSemConfirmar] = useState(false);
+  const [confirmandoLote, setConfirmandoLote] = useState(false);
+  const [lote, setLote] = useState<Lote | null>(null);
+
+  useEffect(() => {
+    try { setSemConfirmar(localStorage.getItem(CHAVE_SEM_CONFIRMAR) === "1"); } catch { /* navegador sem armazenamento: pergunta sempre */ }
+  }, []);
+  function mudarSemConfirmar(sim: boolean) {
+    setSemConfirmar(sim);
+    try { localStorage.setItem(CHAVE_SEM_CONFIRMAR, sim ? "1" : "0"); } catch { /* fica só nesta visita */ }
+  }
+
+  // o que sumiu da fila (publicado, ignorado) sai da seleção sozinho
+  const selecionados = comentarios.filter((c) => marcados.has(c.id));
+  const andando = !!lote?.andando;
+  const marcar = (id: string, sim: boolean) => setMarcados((m) => {
+    const n = new Set(m);
+    if (sim && n.size < MAXIMO_LOTE) n.add(id); else n.delete(id);
+    return n;
+  });
+  const quaisCabem = comentarios.slice(0, MAXIMO_LOTE).map((c) => c.id);
+  const todosMarcados = quaisCabem.length > 0 && quaisCabem.every((id) => marcados.has(id));
+
+  async function publicarLote() {
+    setConfirmandoLote(false);
+    const fila = selecionados.map((c) => ({ id: c.id, autor: c.autor_nome, texto: (textos.current[c.id] ?? c.rascunho ?? "").trim() }));
+    const estado: Lote = { total: fila.length, feitos: 0, ok: 0, falhas: [], andando: true, parouNoLimite: false };
+    setLote({ ...estado });
+    for (let i = 0; i < fila.length; i++) {
+      const item = fila[i];
+      const r = item.texto.length < 2
+        ? { ok: false as const, erro: "a resposta está vazia" }
+        : await chamarFuncao<{ mensagem: string }>("youtube-responder", { acao: "publicar", comentario_id: item.id, texto: item.texto });
+      estado.feitos++;
+      if (r.ok) estado.ok++; else estado.falhas.push(`${item.autor}: ${r.erro}`);
+      setLote({ ...estado, falhas: [...estado.falhas] });
+      if (!r.ok && /^Limite de \d+ respostas por dia/.test(r.erro)) { estado.parouNoLimite = true; break; }
+      if (i < fila.length - 1) await esperar(INTERVALO_LOTE_MS);
+    }
+    setLote({ ...estado, falhas: [...estado.falhas], andando: false });
+    setMarcados(new Set());
+    router.refresh();
+  }
+
   if (!comentarios.length) {
-    return <p className="cartao p-5 text-sm text-zinc-500">Nenhuma resposta esperando revisão. Quando a varredura achar comentários com chance de virar consulta, as respostas aparecem aqui.</p>;
+    return <p className="cartao p-5 text-sm text-zinc-500">{filtrada ? "Nenhuma resposta na fila com este filtro." : "Nenhuma resposta esperando revisão. Quando a varredura achar comentários com chance de virar consulta, as respostas aparecem aqui."}</p>;
   }
   return (
-    <ul className="space-y-3">
-      {comentarios.map((c) => <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId} conversa={c.conversa_de ? conversas[c.conversa_de] ?? null : null} />)}
-    </ul>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-zinc-600">
+        <label className="flex cursor-pointer items-center gap-1.5">
+          <input type="checkbox" className="size-4 accent-teal-700" checked={todosMarcados} disabled={andando}
+            onChange={(e) => setMarcados(e.target.checked ? new Set(quaisCabem) : new Set())} />
+          Selecionar {comentarios.length > MAXIMO_LOTE ? `as ${MAXIMO_LOTE} primeiras` : "todas"}
+        </label>
+        <label className="flex cursor-pointer items-center gap-1.5">
+          <input type="checkbox" className="size-4 accent-teal-700" checked={semConfirmar} onChange={(e) => mudarSemConfirmar(e.target.checked)} />
+          Publicar sem pedir confirmação
+        </label>
+      </div>
+
+      {lote && (
+        <div className="cartao space-y-1 p-3 text-sm" role="status">
+          {lote.andando
+            ? <p className="flex items-center gap-2 font-medium"><LoaderCircle size={14} className="animate-spin" /> Publicando {Math.min(lote.feitos + 1, lote.total)} de {lote.total}… (uma por vez, com intervalo)</p>
+            : <p className="font-medium">{lote.ok} de {lote.total} publicada(s).{lote.parouNoLimite ? " Parou no limite diário; as outras continuam na fila." : ""}</p>}
+          {lote.falhas.length > 0 && (
+            <ul className="list-disc pl-5 text-zinc-700">{lote.falhas.map((f) => <li key={f}>{f}</li>)}</ul>
+          )}
+          {!lote.andando && <button className="text-xs underline" onClick={() => setLote(null)}>fechar</button>}
+        </div>
+      )}
+
+      <ul className="space-y-3">
+        {comentarios.map((c) => (
+          <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId}
+            conversa={c.conversa_de ? conversas[c.conversa_de] ?? null : null}
+            semConfirmar={semConfirmar} selecionado={marcados.has(c.id)} travado={andando}
+            aoSelecionar={(sim) => marcar(c.id, sim)} aoMudarTexto={(t) => { textos.current[c.id] = t; }} />
+        ))}
+      </ul>
+
+      {selecionados.length > 0 && !andando && (
+        <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-lg">
+          <ListChecks size={18} className="text-teal-700" />
+          {confirmandoLote ? (
+            <>
+              <span>Publicar <b>{selecionados.length}</b> resposta(s) no YouTube como <b>{canal}</b>? Ficam públicas em seu nome, com o texto que está em cada cartão.</span>
+              <button className="botao" onClick={publicarLote}>Confirmar e publicar</button>
+              <button className="botao-claro" onClick={() => setConfirmandoLote(false)}>Cancelar</button>
+            </>
+          ) : (
+            <>
+              <span><b>{selecionados.length}</b> selecionada(s){selecionados.length >= MAXIMO_LOTE ? ` (máximo ${MAXIMO_LOTE} por vez)` : ""}</span>
+              <button className="botao" onClick={() => setConfirmandoLote(true)}><Send size={14} /> Publicar selecionadas</button>
+              <button className="botao-claro" onClick={() => setMarcados(new Set())}>Limpar seleção</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
