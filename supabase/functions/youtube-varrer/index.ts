@@ -19,13 +19,15 @@ import {
   responder, respostaDeErro,
 } from "../_shared/base.ts";
 import { type Avaliacao, carregarConfig, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
-import { canalConectado, gastarCota, lerPagina, titulosDosVideos, tokenDeAcesso, type ComentarioLido } from "../_shared/youtube.ts";
+import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, titulosDosVideos, tokenDeAcesso, type ComentarioLido } from "../_shared/youtube.ts";
+import { mensagensDepoisDoCanal } from "../_shared/texto.ts";
 
 const MAX_PASSOS = 16;
 const LOTE_TRIAGEM = 40;
 const LOTE_REDACAO = 6;
 const PAGINAS_NOVOS = 5;
 const PAGINAS_HISTORICO = 3;
+const CONVERSAS_POR_PASSO = 30;
 
 function iguais(a: string, b: string): boolean {
   if (!a || a.length !== b.length) return false;
@@ -130,10 +132,53 @@ async function lerHistorico(v: Varredura, canalId: string, token: string): Promi
   return `${gravados} comentário(s) antigo(s) lido(s)${ate ? ` (até ${new Date(ate).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })})` : ""}.${!pagina ? " Histórico do canal lido por inteiro." : ""}`;
 }
 
+/** Seguir a conversa (David, 14/11/26): nas conversas em que o canal respondeu
+ *  nos últimos 30 dias, o que chegou depois da última resposta do canal vira
+ *  mensagem de continuação (conversa_de) e passa pela triagem. 1 unidade por
+ *  conversa. */
+async function lerConversas(clienteId: string, canalId: string, token: string): Promise<string> {
+  const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data } = await admin.from("yt_comentarios")
+    .select("id, comentario_id, video_id, video_titulo, lead_id, autor_canal_id")
+    .eq("cliente_id", clienteId).is("conversa_de", null).is("deleted_at", null)
+    .or(`and(resposta.eq.publicada,publicada_em.gte.${desde}),and(ja_respondido.eq.true,publicado_em.gte.${desde})`)
+    .order("conversa_checada_em", { ascending: true, nullsFirst: true }).limit(CONVERSAS_POR_PASSO);
+  const topos = data ?? [];
+  if (!topos.length) return "Nenhuma conversa para conferir.";
+  let novas = 0;
+  for (const t of topos) {
+    await gastarCota(clienteId, 1);
+    const depois = mensagensDepoisDoCanal(await mensagensDaConversa(token, t.comentario_id), canalId);
+    if (depois.length) {
+      const { data: ja } = await admin.from("yt_comentarios").select("thread_id").eq("cliente_id", clienteId).in("thread_id", depois.map((m) => m.id));
+      const conhecidas = new Set((ja ?? []).map((x) => x.thread_id as string));
+      const ineditas = depois.filter((m) => !conhecidas.has(m.id));
+      if (ineditas.length) {
+        // a pessoa escreveu de novo: sugestão antiga desta conversa, não
+        // editada, sai da fila (uma resposta por conversa, para a mais nova)
+        await admin.from("yt_comentarios").update({ resposta: "nenhuma", resposta_msg: "Substituída: chegou mensagem mais nova nesta conversa." })
+          .eq("conversa_de", t.id).in("resposta", ["redigir", "rascunho", "falhou"]).eq("rascunho_editado", false);
+        const linhas = ineditas.map((m) => ({
+          cliente_id: clienteId, canal_id: canalId, thread_id: m.id, comentario_id: t.comentario_id, video_id: t.video_id,
+          video_titulo: t.video_titulo, autor_nome: m.autor_nome, autor_canal_id: m.autor_canal_id, autor_foto_url: m.autor_foto_url,
+          texto: m.texto, publicado_em: m.publicado_em, conversa_de: t.id,
+          // o lead da conversa só se quem escreveu é a mesma pessoa
+          lead_id: m.autor_canal_id && m.autor_canal_id === t.autor_canal_id ? t.lead_id : null,
+        }));
+        const { data: ins, error } = await admin.from("yt_comentarios").upsert(linhas, { onConflict: "cliente_id,thread_id", ignoreDuplicates: true }).select("id");
+        if (error) throw new Falha(`Não consegui gravar as mensagens novas da conversa (${error.message}).`, 500);
+        novas += ins?.length ?? 0;
+      }
+    }
+    await admin.from("yt_comentarios").update({ conversa_checada_em: new Date().toISOString() }).eq("id", t.id);
+  }
+  return `${topos.length} conversa(s) conferida(s): ${novas} mensagem(ns) nova(s) de quem você respondeu.`;
+}
+
 async function passoTriar(clienteId: string): Promise<string> {
   const c = await carregarConfig(clienteId);
   const { data } = await admin.from("yt_comentarios")
-    .select("id, texto, autor_nome, autor_canal_id, autor_foto_url, video_titulo, ja_respondido, pode_responder")
+    .select("id, texto, autor_nome, autor_canal_id, autor_foto_url, video_titulo, ja_respondido, pode_responder, conversa_de, lead_id, publicado_em")
     .eq("cliente_id", clienteId).eq("triagem", "pendente").is("deleted_at", null)
     .order("publicado_em", { ascending: false }).limit(LOTE_TRIAGEM);
   const lote = data ?? [];
@@ -148,7 +193,8 @@ async function passoTriar(clienteId: string): Promise<string> {
       continue;
     }
     let leadId: string | null = null;
-    const ehLead = qualifica(a, c) && !!x.autor_canal_id;
+    // continuação de conversa de quem já é lead continua lead
+    const ehLead = (qualifica(a, c) || (!!x.conversa_de && !!x.lead_id)) && !!x.autor_canal_id;
     if (ehLead) {
       const { data: id, error } = await admin.rpc("garantir_lead", {
         p_cliente: clienteId, p_autor: x.autor_canal_id, p_nome: x.autor_nome, p_foto: x.autor_foto_url, p_prob: a.probabilidade, p_procs: a.procedimentos,
@@ -159,8 +205,17 @@ async function passoTriar(clienteId: string): Promise<string> {
       await admin.from("lead_eventos").insert({ cliente_id: clienteId, lead_id: leadId, tipo: "comentario", texto: x.texto.slice(0, 4000), comentario_id: x.id, feito_por: null });
       // o médico já respondeu no YouTube: o lead já está em conversa
       if (x.ja_respondido) await admin.from("leads").update({ etapa: "respondido" }).eq("id", leadId).eq("etapa", "novo");
+      // a pessoa respondeu à resposta: a conversa andou
+      if (x.conversa_de) await admin.from("leads").update({ etapa: "conversando" }).eq("id", leadId).in("etapa", ["novo", "respondido"]);
     }
-    const responder = ehLead && !x.ja_respondido && x.pode_responder;
+    let responder = ehLead && !x.ja_respondido && x.pode_responder;
+    if (responder && x.conversa_de) {
+      // na conversa, só a mensagem mais nova ganha resposta, e só se pede algo
+      // (não para "obrigada", elogio ou spam)
+      const { count: maisNovas } = await admin.from("yt_comentarios").select("id", { count: "exact", head: true })
+        .eq("conversa_de", x.conversa_de).gt("publicado_em", x.publicado_em);
+      responder = !maisNovas && (a.urgente || !["elogio", "spam", "critica", "outro"].includes(a.categoria));
+    }
     if (responder) paraResponder++;
     await admin.from("yt_comentarios").update({
       triagem: "feita", probabilidade: a.probabilidade, categoria: a.categoria, procedimentos: a.procedimentos, urgente: a.urgente,
@@ -192,7 +247,8 @@ async function passoRedigir(clienteId: string): Promise<string> {
   let juntados = 0;
   for (const it of candidatos) {
     if (itens.length >= LOTE_REDACAO) break;
-    if (it.lead_id && (pessoasDoLote.has(it.lead_id) || await jaTemRespostaDaPessoa(it.lead_id, it.id))) {
+    // continuação de conversa: a regra é uma por conversa (aplicada ao ler)
+    if (!it.conversa_de && it.lead_id && (pessoasDoLote.has(it.lead_id) || await jaTemRespostaDaPessoa(it.lead_id, it.id))) {
       juntados++;
       await admin.from("yt_comentarios").update({
         resposta: "nenhuma", resposta_msg: "Mesma pessoa de outro comentário que já tem resposta (na fila ou publicada há menos de 7 dias): uma resposta por vez.",
@@ -219,9 +275,11 @@ async function passo(clienteId: string): Promise<void> {
     }
     const atual = v.passo ?? "ler_novos";
     let msg: string;
-    if (atual === "ler_novos" || atual === "ler_historico") {
+    if (atual === "ler_novos" || atual === "ler_historico" || atual === "conversas") {
       const token = await tokenDeAcesso(clienteId);
-      msg = atual === "ler_novos" ? await lerNovos(v, canal.canal_id, token) : await lerHistorico(v, canal.canal_id, token);
+      msg = atual === "ler_novos" ? await lerNovos(v, canal.canal_id, token)
+        : atual === "conversas" ? await lerConversas(clienteId, canal.canal_id, token)
+        : await lerHistorico(v, canal.canal_id, token);
     } else if (atual === "triar") {
       msg = await passoTriar(clienteId);
     } else {
@@ -232,7 +290,8 @@ async function passo(clienteId: string): Promise<void> {
     // então avançar no histórico
     const { data: depois } = await admin.from("yt_varreduras").select("historico_token, historico_completo").eq("cliente_id", clienteId).single();
     let proximo: string | null = null;
-    if (await contar(clienteId, "triagem", "pendente")) proximo = "triar";
+    if (atual === "ler_novos") proximo = "conversas";
+    else if (await contar(clienteId, "triagem", "pendente")) proximo = "triar";
     else if (await contar(clienteId, "resposta", "redigir")) proximo = "redigir";
     else if (!depois?.historico_completo && depois?.historico_token) proximo = "ler_historico";
 

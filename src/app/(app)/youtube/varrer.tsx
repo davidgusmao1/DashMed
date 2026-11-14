@@ -9,6 +9,7 @@ import type { Varredura } from "@/lib/youtube";
 
 const PASSO: Record<string, string> = {
   ler_novos: "lendo comentários novos",
+  conversas: "conferindo as conversas em que você respondeu",
   ler_historico: "lendo comentários antigos",
   triar: "a IA está triando os comentários",
   redigir: "a IA está escrevendo as respostas",

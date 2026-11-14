@@ -23,7 +23,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
   const lead = l as Lead & { cliente_id: string };
 
   const [{ data: comentarios }, { data: eventos }, { data: usuarios }, { data: paciente }] = await Promise.all([
-    supabase.from("yt_comentarios").select("id, comentario_id, video_id, video_titulo, texto, publicado_em, probabilidade, categoria, urgente, resposta, rascunho, publicada_em, resposta_youtube_id")
+    supabase.from("yt_comentarios").select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, texto, publicado_em, probabilidade, categoria, urgente, resposta, rascunho, publicada_em, resposta_youtube_id")
       .eq("lead_id", id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(50),
     supabase.from("lead_eventos").select("id, tipo, texto, feito_por, feito_em").eq("lead_id", id).order("feito_em", { ascending: false }).limit(200),
     supabase.from("usuarios").select("id, nome").eq("ativo", true).is("deleted_at", null).order("nome"),
@@ -61,6 +61,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
               <div key={c.id} className="cartao space-y-2 p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-x-2 text-xs text-zinc-500">
                   <span>{dataHora(c.publicado_em)}</span>
+                  {c.conversa_de && <b className="text-zinc-800">↳ continuação da conversa</b>}
                   {c.probabilidade != null && <span className="rounded bg-teal-50 px-1 font-semibold text-teal-800">{c.probabilidade}%</span>}
                   {c.categoria && <span>{ROTULO_CATEGORIA[c.categoria] ?? c.categoria}</span>}
                   {c.urgente && <b className="text-zinc-900">urgente</b>}
@@ -79,7 +80,7 @@ export default async function FichaLead({ params }: { params: Promise<{ id: stri
                 {/* abre o vídeo com o comentário destacado no topo (David, 12/11/26:
                     "ver o comentário lá no YouTube original da paciente") */}
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro px-3 py-1.5 text-xs">
+                  <a href={LINK_VIDEO(c.video_id, c.conversa_de ? c.thread_id : c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro px-3 py-1.5 text-xs">
                     <ExternalLink size={13} /> Ver no YouTube
                   </a>
                   {c.resposta === "publicada" && c.resposta_youtube_id && (

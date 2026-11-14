@@ -44,6 +44,9 @@ export const TIPOS_EVENTO: Record<string, string> = {
 export type Comentario = {
   id: string;
   comentario_id: string;
+  /** na continuação de conversa, o id da própria mensagem no YouTube */
+  thread_id: string;
+  conversa_de: string | null;
   video_id: string;
   video_titulo: string | null;
   autor_nome: string;

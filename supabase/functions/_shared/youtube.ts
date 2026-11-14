@@ -192,12 +192,49 @@ export async function titulosDosVideos(token: string, ids: string[]): Promise<Ma
   return mapa;
 }
 
-/** O canal do médico já respondeu este comentário? (confere na hora de publicar) */
-export async function canalJaRespondeu(token: string, comentarioId: string, canalId: string): Promise<boolean> {
-  const r = await yt<{ items?: { snippet: { authorChannelId?: { value?: string } } }[] }>(
-    token, `/comments?part=snippet&maxResults=100&textFormat=plainText&parentId=${encodeURIComponent(comentarioId)}`,
-  );
-  return (r.items ?? []).some((c) => c.snippet.authorChannelId?.value === canalId);
+export type MensagemDaConversa = {
+  id: string;
+  autor_nome: string;
+  autor_canal_id: string | null;
+  autor_foto_url: string | null;
+  texto: string;
+  publicado_em: string;
+};
+
+/** As respostas de uma conversa (abaixo do comentário de topo), da mais antiga
+ *  para a mais nova. 1 unidade por página de 100. */
+export async function mensagensDaConversa(token: string, comentarioId: string): Promise<MensagemDaConversa[]> {
+  const todas: MensagemDaConversa[] = [];
+  let pagina: string | null = null;
+  for (let i = 0; i < 3; i++) {
+    const q = new URLSearchParams({ part: "snippet", maxResults: "100", textFormat: "plainText", parentId: comentarioId });
+    if (pagina) q.set("pageToken", pagina);
+    const r = await yt<{
+      items?: { id: string; snippet: { authorDisplayName?: string; authorProfileImageUrl?: string; authorChannelId?: { value?: string }; textOriginal?: string; textDisplay?: string; publishedAt: string } }[];
+      nextPageToken?: string;
+    }>(token, `/comments?${q}`);
+    for (const c of r.items ?? []) {
+      todas.push({
+        id: c.id,
+        autor_nome: (c.snippet.authorDisplayName ?? "").replace(/^@/, "").slice(0, 200) || "Sem nome",
+        autor_canal_id: c.snippet.authorChannelId?.value ?? null,
+        autor_foto_url: c.snippet.authorProfileImageUrl ?? null,
+        texto: (c.snippet.textOriginal ?? c.snippet.textDisplay ?? "").slice(0, 10_000),
+        publicado_em: c.snippet.publishedAt,
+      });
+    }
+    pagina = r.nextPageToken ?? null;
+    if (!pagina) break;
+  }
+  return todas.sort((a, b) => a.publicado_em.localeCompare(b.publicado_em));
+}
+
+/** O canal do médico já respondeu? (confere na hora de publicar). Numa
+ *  continuação de conversa, só conta resposta do canal DEPOIS da mensagem
+ *  (depoisDe) — antes dela o canal já tinha respondido, é o que puxou a conversa. */
+export async function canalJaRespondeu(token: string, comentarioId: string, canalId: string, depoisDe?: string): Promise<boolean> {
+  const msgs = await mensagensDaConversa(token, comentarioId);
+  return msgs.some((m) => m.autor_canal_id === canalId && (!depoisDe || m.publicado_em > depoisDe));
 }
 
 /** Publica a resposta como o canal conectado. */

@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
 
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");
     const { data: c } = await admin.from("yt_comentarios")
-      .select("id, cliente_id, comentario_id, resposta, rascunho, rascunho_editado, lead_id, pode_responder")
+      .select("id, cliente_id, comentario_id, resposta, rascunho, rascunho_editado, lead_id, pode_responder, conversa_de, publicado_em")
       .eq("id", p.comentario_id).is("deleted_at", null).maybeSingle();
     if (!c || !enxerga(eu, c.cliente_id)) throw new Falha("Comentário não encontrado.", 404);
 
@@ -64,7 +64,8 @@ Deno.serve(async (req) => {
         const canal = await canalConectado(c.cliente_id);
         const token = await tokenDeAcesso(c.cliente_id);
         await gastarCota(c.cliente_id, 1);
-        if (await canalJaRespondeu(token, c.comentario_id, canal.canal_id)) {
+        // continuação de conversa: só conta resposta do canal depois da mensagem
+        if (await canalJaRespondeu(token, c.comentario_id, canal.canal_id, c.conversa_de ? c.publicado_em : undefined)) {
           await admin.from("yt_comentarios").update({
             resposta: "ignorada", ja_respondido: true, resposta_msg: "Você já respondeu este comentário direto no YouTube; a DashMed não publicou nada.",
           }).eq("id", c.id);

@@ -1,6 +1,6 @@
 // Regras de texto do YouTube Seller (12/11/26). Roda em segundos:
 //   deno run --allow-read supabase/tests/youtube.ts
-import { editouDeVerdade, garantirCodigo, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink } from "../functions/_shared/texto.ts";
+import { editouDeVerdade, garantirCodigo, mensagensDepoisDoCanal, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink } from "../functions/_shared/texto.ts";
 
 let falhas = 0;
 function confere(nome: string, ok: boolean, detalhe = "") {
@@ -45,6 +45,20 @@ confere("resposta longa demais é recusada", (problemaNaResposta("a ".repeat(600
 confere("espaço e maiúscula não contam como edição", !editouDeVerdade("Olá, Maria!  Tudo bem?", "olá, maria! tudo bem?"));
 confere("texto trocado conta como edição", editouDeVerdade("Agende pelo WhatsApp.", "Agende pela secretária no WhatsApp."));
 confere("sem sugestão guardada não conta", !editouDeVerdade(null, "qualquer coisa"));
+
+// seguir a conversa: só o que chegou depois da última resposta do canal
+const conversa = [
+  { autor_canal_id: "UCpessoa", publicado_em: "2026-11-01T10:00:00Z", texto: "pergunta" },
+  { autor_canal_id: "UCcanal", publicado_em: "2026-11-02T10:00:00Z", texto: "resposta do canal" },
+  { autor_canal_id: "UCpessoa", publicado_em: "2026-11-03T10:00:00Z", texto: "e quanto custa?" },
+  { autor_canal_id: "UCoutra", publicado_em: "2026-11-03T11:00:00Z", texto: "também quero saber" },
+  { autor_canal_id: "UCpessoa", publicado_em: "2026-11-03T12:00:00Z", texto: "   " },
+];
+const novasConversa = mensagensDepoisDoCanal(conversa, "UCcanal");
+confere("pega as mensagens depois da resposta do canal", novasConversa.length === 2 && novasConversa[0].texto === "e quanto custa?");
+confere("mensagem vazia não conta", !novasConversa.some((m) => !m.texto.trim()));
+confere("canal respondeu por último: nada a seguir", mensagensDepoisDoCanal([...conversa.slice(0, 4), { autor_canal_id: "UCcanal", publicado_em: "2026-11-04T10:00:00Z", texto: "ok" }], "UCcanal").length === 0);
+confere("canal nunca respondeu: nada a seguir", mensagensDepoisDoCanal([conversa[0], conversa[2]], "UCcanal").length === 0);
 
 if (falhas) {
   console.error(`\n${falhas} regra(s) falharam.`);

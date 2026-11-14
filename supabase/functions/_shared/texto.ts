@@ -234,3 +234,15 @@ export function editouDeVerdade(sugestao: string | null | undefined, publicado: 
   const norma = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   return norma(sugestao) !== norma(publicado);
 }
+
+/** Seguir a conversa (14/11/26): as mensagens de outras pessoas que chegaram
+ *  DEPOIS da última resposta do canal. Se o canal nunca respondeu na conversa,
+ *  não há o que seguir (o comentário de topo é tratado pela leitura normal). */
+export function mensagensDepoisDoCanal<T extends { autor_canal_id: string | null; publicado_em: string; texto: string }>(
+  msgs: T[], canalId: string,
+): T[] {
+  const doCanal = msgs.filter((m) => m.autor_canal_id === canalId).map((m) => m.publicado_em).sort();
+  const ultima = doCanal[doCanal.length - 1];
+  if (!ultima) return [];
+  return msgs.filter((m) => m.autor_canal_id !== canalId && m.publicado_em > ultima && m.texto.trim() !== "");
+}

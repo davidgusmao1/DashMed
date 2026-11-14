@@ -46,13 +46,22 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
   let conteudo: React.ReactNode = null;
   if (aba === "fila") {
     const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id")
+      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id")
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null)
       .order("urgente", { ascending: false }).order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false }).limit(40);
     const lista = (data ?? []) as Comentario[];
     const ids = [...new Set(lista.map((c) => c.lead_id).filter(Boolean))] as string[];
     const { data: leads } = ids.length ? await supabase.from("leads").select("id, codigo").in("id", ids) : { data: [] };
-    conteudo = <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} />;
+    // continuação de conversa: o comentário original e a resposta que foi dada
+    const topoIds = [...new Set(lista.map((c) => c.conversa_de).filter(Boolean))] as string[];
+    const { data: topos } = topoIds.length
+      ? await supabase.from("yt_comentarios").select("id, texto, rascunho, resposta, ja_respondido").in("id", topoIds)
+      : { data: [] };
+    const conversas = Object.fromEntries((topos ?? []).map((t) => [t.id, {
+      comentario: t.texto as string,
+      resposta: t.resposta === "publicada" ? (t.rascunho as string | null) : t.ja_respondido ? "(você respondeu direto no YouTube)" : null,
+    }]));
+    conteudo = <Fila comentarios={lista} codigos={Object.fromEntries((leads ?? []).map((l) => [l.id, l.codigo]))} canal={canal?.canal_titulo ?? "seu canal"} clienteId={emFoco.id} conversas={conversas} />;
   } else if (aba === "leads") {
     const { data } = await supabase.from("leads")
       .select("id, nome, foto_url, codigo, etapa, probabilidade, procedimentos, proximo_passo_em, atualizado_em, paciente_id")

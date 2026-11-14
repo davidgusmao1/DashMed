@@ -13,7 +13,9 @@ import { type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "
 import { ignorarResposta, salvarRascunho } from "./acoes";
 import JanelaTreino from "./treino";
 
-function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string | null; canal: string; clienteId: string }) {
+type Conversa = { comentario: string; resposta: string | null };
+
+function Cartao({ c, codigo, canal, clienteId, conversa }: { c: Comentario; codigo: string | null; canal: string; clienteId: string; conversa: Conversa | null }) {
   const router = useRouter();
   const [texto, setTexto] = useState(c.rascunho ?? "");
   const [editado, setEditado] = useState(false);
@@ -91,13 +93,21 @@ function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string
             {c.urgente && <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white"><Siren size={12} /> urgente</span>}
             <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
             {c.categoria && <span className="text-xs text-zinc-500">{ROTULO_CATEGORIA[c.categoria] ?? c.categoria}</span>}
+            {c.conversa_de && <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white">continuação da conversa</span>}
             {c.procedimentos.map((p) => <span key={p} className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700">{p}</span>)}
             {codigo && c.lead_id && <Link href={`/youtube/leads/${c.lead_id}`} className="text-xs text-zinc-500 underline">lead {codigo}</Link>}
           </div>
           <div className="text-xs text-zinc-400">
             {dataHora(c.publicado_em)} · <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="hover:underline">{c.video_titulo ?? "vídeo"} <ExternalLink size={10} className="inline" /></a>
           </div>
-          <p className="mt-2 whitespace-pre-line text-sm text-zinc-800">{c.texto}</p>
+          {conversa && (
+            <details className="mt-2 rounded-lg bg-zinc-50 p-2 text-xs text-zinc-600">
+              <summary className="cursor-pointer">Conversa até aqui</summary>
+              <p className="mt-1 whitespace-pre-line"><b>Comentário:</b> {conversa.comentario}</p>
+              {conversa.resposta && <p className="mt-1 whitespace-pre-line"><b>Você respondeu:</b> {conversa.resposta}</p>}
+            </details>
+          )}
+          <p className="mt-2 whitespace-pre-line text-sm text-zinc-800">{c.conversa_de && <b>Nova mensagem: </b>}{c.texto}</p>
           {c.resumo && <p className="mt-1 text-xs text-zinc-500">IA: {c.resumo}</p>}
         </div>
       </div>
@@ -149,7 +159,7 @@ function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string
           <button className="botao-claro" onClick={() => setModo("refazer")} disabled={!!ocupado}><Sparkles size={14} /> Refazer com a IA</button>
           <button className="botao-claro" onClick={ignorar} disabled={!!ocupado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
           <button className="botao-claro" onClick={() => setTreinando(true)} disabled={!!ocupado}><GraduationCap size={14} /> Treinamento da IA</button>
-          <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro"><ExternalLink size={14} /> Ver no YouTube</a>
+          <a href={LINK_VIDEO(c.video_id, c.conversa_de ? c.thread_id : c.comentario_id)} target="_blank" rel="noreferrer" className="botao-claro"><ExternalLink size={14} /> Ver no YouTube</a>
         </div>
       )}
       {ocupado === "refazer" && modo === "ver" && <p className="flex items-center gap-2 text-sm text-zinc-600"><LoaderCircle size={14} className="animate-spin" /> Refazendo a resposta com o treinamento…</p>}
@@ -162,13 +172,15 @@ function Cartao({ c, codigo, canal, clienteId }: { c: Comentario; codigo: string
   );
 }
 
-export default function Fila({ comentarios, codigos, canal, clienteId }: { comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string }) {
+export default function Fila({ comentarios, codigos, canal, clienteId, conversas }: {
+  comentarios: Comentario[]; codigos: Record<string, string>; canal: string; clienteId: string; conversas: Record<string, Conversa>;
+}) {
   if (!comentarios.length) {
     return <p className="cartao p-5 text-sm text-zinc-500">Nenhuma resposta esperando revisão. Quando a varredura achar comentários com chance de virar consulta, as respostas aparecem aqui.</p>;
   }
   return (
     <ul className="space-y-3">
-      {comentarios.map((c) => <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId} />)}
+      {comentarios.map((c) => <Cartao key={c.id + (c.rascunho ?? "")} c={c} codigo={c.lead_id ? codigos[c.lead_id] ?? null : null} canal={canal} clienteId={clienteId} conversa={c.conversa_de ? conversas[c.conversa_de] ?? null : null} />)}
     </ul>
   );
 }

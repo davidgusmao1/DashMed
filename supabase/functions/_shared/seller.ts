@@ -5,6 +5,7 @@
 // das configurações (conferido em problemaNaResposta).
 import { admin, carregarPerfil, Falha, perfilEmTexto } from "./base.ts";
 import { claudeDoCliente, pedirJson } from "./claude.ts";
+import { canalConectado, gastarCota, mensagensDaConversa, tokenDeAcesso } from "./youtube.ts";
 import { editouDeVerdade, garantirCodigo, LIMITE_RESPOSTA, problemaNaResposta } from "./texto.ts";
 
 export type Config = {
@@ -147,6 +148,9 @@ export type ParaRedigir = {
   resumo: string | null;
   codigo: string;
   lead_id: string | null;
+  /** continuação de conversa: a linha de topo e a conversa até aqui */
+  conversa_de: string | null;
+  conversa: string | null;
 };
 
 const REGRAS_CFM = `Regras da Resolução CFM 2.336/2023 que toda resposta cumpre:
@@ -170,7 +174,8 @@ Cada resposta:
 - sempre que mandar a pessoa para um telefone ou WhatsApp, peça na mesma frase para ela dizer o código do comentário (ex.: "chame no WhatsApp (51) 0000-0000 e diga que veio do YouTube, código YT1234"); é assim que a equipe sabe de que comentário veio;
 - quando sugerir a estimativa de custo de um tratamento, use o telefone de estimativa;
 - elogio ou agradecimento sem pergunta: agradeça em uma ou duas frases, sem oferta;
-- cada resposta é escrita para aquele comentário: não repita a mesma abertura nem o mesmo fechamento entre as respostas do lote.
+- cada resposta é escrita para aquele comentário: não repita a mesma abertura nem o mesmo fechamento entre as respostas do lote;
+- quando o item trouxer CONVERSA ATÉ AQUI, é a continuação de uma conversa em que você já respondeu: responda só à NOVA MENSAGEM, sem se apresentar de novo e sem repetir a oferta inteira; retome só o que a pessoa pediu agora (por exemplo, o telefone de orçamento com o código).
 
 Opções de atendimento configuradas:
 - Consulta por telemedicina: ${opcao(c.telemedicina)}
@@ -205,7 +210,7 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
   const pedido = itens.map((x, i) => [
     `c${i + 1} | código ${x.codigo} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}`,
     `triagem: ${x.categoria ?? "?"}${x.urgente ? " | URGENTE" : ""}${x.procedimentos.length ? ` | ${x.procedimentos.join(", ")}` : ""}${x.resumo ? ` | ${x.resumo}` : ""}`,
-    `comentário: ${x.texto.slice(0, 2000)}`,
+    x.conversa ? `CONVERSA ATÉ AQUI:\n${x.conversa}\nNOVA MENSAGEM (responda a esta): ${x.texto.slice(0, 2000)}` : `comentário: ${x.texto.slice(0, 2000)}`,
   ].join("\n")).join("\n\n");
   const r = await pedirJson<{ respostas: { id: string; texto: string }[] }>(claude, {
     sistema: sistemaResposta(c, perfilEmTexto(perfil), treinos),
@@ -251,7 +256,7 @@ export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redi
 /** Os comentários a redigir, com o código do lead de cada um. */
 export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; limite: number }): Promise<ParaRedigir[]> {
   let q = admin.from("yt_comentarios")
-    .select("id, texto, autor_nome, video_titulo, categoria, procedimentos, urgente, resumo, lead_id")
+    .select("id, texto, autor_nome, video_titulo, categoria, procedimentos, urgente, resumo, lead_id, conversa_de, comentario_id, publicado_em")
     .eq("cliente_id", filtro.clienteId).is("deleted_at", null);
   q = filtro.ids ? q.in("id", filtro.ids) : q.eq("resposta", "redigir").order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false });
   const { data } = await q.limit(filtro.limite);
@@ -259,10 +264,30 @@ export async function paraRedigir(filtro: { clienteId: string; ids?: string[]; l
   const leadIds = [...new Set(linhas.map((l) => l.lead_id).filter(Boolean))] as string[];
   const { data: leads } = leadIds.length ? await admin.from("leads").select("id, codigo").in("id", leadIds) : { data: [] };
   const codigo = new Map((leads ?? []).map((l) => [l.id as string, l.codigo as string]));
+  // continuação de conversa: a conversa até a mensagem, lida no YouTube na hora
+  // (fonte da verdade: inclui o que o médico respondeu direto no YouTube)
+  const conversas = new Map<string, string>();
+  const deConversa = linhas.filter((l) => l.conversa_de);
+  if (deConversa.length) {
+    const [canal, token] = await Promise.all([canalConectado(filtro.clienteId), tokenDeAcesso(filtro.clienteId)]);
+    const { data: topos } = await admin.from("yt_comentarios").select("id, texto, autor_nome").in("id", deConversa.map((l) => l.conversa_de as string));
+    const topo = new Map((topos ?? []).map((t) => [t.id as string, t]));
+    for (const l of deConversa) {
+      await gastarCota(filtro.clienteId, 1);
+      const msgs = await mensagensDaConversa(token, l.comentario_id);
+      const t = topo.get(l.conversa_de as string);
+      const linhasConversa = [
+        t ? `[${t.autor_nome}] ${String(t.texto).slice(0, 800)}` : null,
+        ...msgs.filter((m) => m.publicado_em < l.publicado_em)
+          .map((m) => `[${m.autor_canal_id === canal.canal_id ? "você (canal)" : m.autor_nome}] ${m.texto.slice(0, 800)}`),
+      ].filter(Boolean) as string[];
+      conversas.set(l.id, linhasConversa.join("\n").slice(-3500));
+    }
+  }
   return linhas.map((l) => ({
     id: l.id, texto: l.texto, autor_nome: l.autor_nome, video_titulo: l.video_titulo, categoria: l.categoria,
     procedimentos: l.procedimentos ?? [], urgente: !!l.urgente, resumo: l.resumo, codigo: l.lead_id ? codigo.get(l.lead_id) ?? "" : "",
-    lead_id: l.lead_id ?? null,
+    lead_id: l.lead_id ?? null, conversa_de: l.conversa_de ?? null, conversa: conversas.get(l.id) ?? null,
   }));
 }
 
