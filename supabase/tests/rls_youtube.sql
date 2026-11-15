@@ -57,6 +57,48 @@ do $$ begin
 exception when unique_violation then insert into resultado values ('vídeo repetido é recusado', true, '');
 end $$;
 
+-- busca por frase (0020): comentários com datas, palavras e procedimentos conhecidos
+insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, video_id, video_titulo, autor_nome, texto, resumo, publicado_em,
+                            triagem, probabilidade, categoria, procedimentos, consulta_pct, cirurgia_pct, socio_pct, pct_em) values
+  ('00000000-0000-4000-8000-0000000000d1', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'bs1', 'bc1', 'v9', 'Tudo sobre Artrose | Quarta do Quadril #224',
+   'Ana', 'Doutor, minha prótese dói muito à noite', null, '2026-11-11 12:00-03', 'feita', 60, 'sintoma', '{}', 50, 20, 40, now()),
+  ('00000000-0000-4000-8000-0000000000d2', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'bs2', 'bc2', 'v9', 'Tudo sobre Artrose | Quarta do Quadril #224',
+   'Bia', 'Adorei o vídeo, doutor!', null, '2026-11-11 23:30-03', 'feita', 5, 'elogio', '{}', 5, 0, null, now()),
+  ('00000000-0000-4000-8000-0000000000d3', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'bs3', 'bc3', 'v1', 'Prótese de quadril: quando posso dirigir?',
+   'Caio', 'Tenho dores no quadril e faço infiltração', null, '2026-11-03 09:00-03', 'feita', 55, 'tratamento', '{"Ácido hialurônico"}', 60, 30, 50, now()),
+  ('00000000-0000-4000-8000-0000000000d4', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'bs4', 'bc4', 'v1', 'Prótese de quadril: quando posso dirigir?',
+   'Davi', 'Quanto custa a cirurgia?', null, '2026-10-20 10:00-03', 'feita', 90, 'preco', '{"Prótese de quadril"}', 90, 80, 70, now()),
+  ('00000000-0000-4000-8000-0000000000d5', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'bs5', 'bc5', 'v1', 'Prótese de quadril: quando posso dirigir?',
+   'Eve', 'My hip hurts a lot', 'Dor forte no quadril, pergunta sobre tratamento', '2026-11-12 10:00-03', 'feita', 40, 'sintoma', '{}', 40, 20, null, now());
+create temp table busca (nome text, filtro jsonb) on commit drop;
+grant all on busca to authenticated;
+insert into busca values
+  ('sem acento', '{"grupos":[{"termos":["protese"],"procedimentos":[]}]}'),
+  ('dor inteira', '{"grupos":[{"termos":["dor"],"procedimentos":[]}]}'),
+  ('dor e variações', '{"grupos":[{"termos":["dor","dores","dói"],"procedimentos":[]}]}'),
+  ('prefixo', '{"grupos":[{"termos":["infiltr*"],"procedimentos":[]}]}'),
+  ('dia', '{"de":"2026-11-11","ate":"2026-11-11"}'),
+  ('todos', '{"grupos":[{"termos":["prótese"],"procedimentos":[]},{"termos":["dói"],"procedimentos":[]}],"todos":true}'),
+  ('qualquer', '{"grupos":[{"termos":["prótese"],"procedimentos":[]},{"termos":["dói"],"procedimentos":[]}],"todos":false}'),
+  ('procedimento', '{"grupos":[{"termos":["artroplastia"],"procedimentos":["Prótese de quadril"]}]}'),
+  ('sem palavra', '{"grupos":[{"termos":["prótese"],"procedimentos":[]}],"sem":["custa"]}'),
+  ('consulta', '{"consulta_min":80}'),
+  ('socio baixo', '{"socio_max":45}'),
+  ('vídeo', '{"videos":["v9"]}'),
+  ('título', '{"video_titulo":"quarta do quadril"}'),
+  ('categoria', '{"categorias":["preco"]}'),
+  ('resumo', '{"grupos":[{"termos":["tratamento"],"procedimentos":[]}]}'),
+  ('injeção', '{"grupos":[{"termos":["'') or 1=1 --"],"procedimentos":[]}]}'),
+  ('símbolos', '{"grupos":[{"termos":[".*","(("],"procedimentos":[]}]}'),
+  ('antigos', '{"de":"2026-10-01","ordem":"antigos"}');
+create function pg_temp.achou(p_nome text) returns text
+language sql as $$
+  select coalesce(string_agg(right(x->>'id', 2), ',' order by o), '')
+  from jsonb_array_elements((select buscar_comentarios('00000000-0000-4000-8000-0000000000c2', filtro, 50, 0)->'itens' from busca where nome = p_nome)) with ordinality t(x, o)
+  where x->>'id' like '00000000-0000-4000-8000-0000000000d%'
+$$;
+grant execute on function pg_temp.achou(text) to authenticated;
+
 -- LGPD (0018): o hash do canal é o mesmo no banco e na edge (hashAutor, youtube-varrer)
 insert into resultado select 'hash do autor igual no banco e na edge', hash_autor_youtube('00000000-0000-4000-8000-0000000000c2', 'UCpessoa') = 'd7d77630deae2db23f9cf1e1e8831ae558cf68906b8fc5ef6749e7a8b56241c9', '';
 
@@ -126,6 +168,11 @@ exception when others then insert into resultado values ('fora não lê o funil'
 end $$;
 insert into resultado select 'fora vê 0 vídeos do canal', count(*) = 0, count(*)::text from yt_videos where cliente_id = '00000000-0000-4000-8000-0000000000c2';
 do $$ begin
+  perform buscar_comentarios('00000000-0000-4000-8000-0000000000c2', '{}', 50, 0);
+  insert into resultado values ('fora não busca comentários', false, 'buscou');
+exception when others then insert into resultado values ('fora não busca comentários', true, sqlerrm);
+end $$;
+do $$ begin
   perform anonimizar_lead((select id from ids where nome = 'a'));
   insert into resultado values ('fora não anonimiza lead', false, 'anonimizou');
 exception when others then insert into resultado values ('fora não anonimiza lead', true, sqlerrm);
@@ -136,6 +183,33 @@ set local request.jwt.claims = '{"sub":":plataforma","role":"authenticated"}';
 insert into resultado select 'plataforma vê os 2 leads', count(*) = 2, count(*)::text from leads where cliente_id = '00000000-0000-4000-8000-0000000000c2';
 insert into resultado select 'plataforma vê o comentário', count(*) = 1, count(*)::text from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
 insert into resultado select 'plataforma lê o resumo', (resumo_youtube('00000000-0000-4000-8000-0000000000c2')->>'leads')::int = 2, '';
+-- busca (0020): cada linha diz quais dos comentários d1..d5 a busca achou, na ordem
+insert into resultado select 'busca: protese acha prótese', pg_temp.achou('sem acento') = 'd1', pg_temp.achou('sem acento');
+insert into resultado select 'busca: dor não pega adorei, doutor nem dores', pg_temp.achou('dor inteira') = 'd5', pg_temp.achou('dor inteira');
+insert into resultado select 'busca: variações de dor', pg_temp.achou('dor e variações') = 'd5,d1,d3', pg_temp.achou('dor e variações');
+insert into resultado select 'busca: infiltr* pega infiltração', pg_temp.achou('prefixo') = 'd3', pg_temp.achou('prefixo');
+insert into resultado select 'busca: um dia no horário de Brasília', pg_temp.achou('dia') = 'd2,d1', pg_temp.achou('dia');
+insert into resultado select 'busca: todos os assuntos juntos', pg_temp.achou('todos') = 'd1', pg_temp.achou('todos');
+insert into resultado select 'busca: qualquer assunto', pg_temp.achou('qualquer') = 'd1', pg_temp.achou('qualquer');
+insert into resultado select 'busca: procedimento marcado pela triagem', pg_temp.achou('procedimento') = 'd4', pg_temp.achou('procedimento');
+insert into resultado select 'busca: sem a palavra', pg_temp.achou('sem palavra') = 'd1', pg_temp.achou('sem palavra');
+insert into resultado select 'busca: consulta 80% ou mais', pg_temp.achou('consulta') = 'd4', pg_temp.achou('consulta');
+insert into resultado select 'busca: socioeconômica até 45% (sem estimativa fica de fora)', pg_temp.achou('socio baixo') = 'd1', pg_temp.achou('socio baixo');
+insert into resultado select 'busca: por vídeo', pg_temp.achou('vídeo') = 'd2,d1', pg_temp.achou('vídeo');
+insert into resultado select 'busca: por trecho do título', pg_temp.achou('título') = 'd2,d1', pg_temp.achou('título');
+insert into resultado select 'busca: por tipo', pg_temp.achou('categoria') = 'd4', pg_temp.achou('categoria');
+insert into resultado select 'busca: olha o resumo da IA', pg_temp.achou('resumo') = 'd5', pg_temp.achou('resumo');
+insert into resultado select 'busca: termo com aspas não vira SQL', pg_temp.achou('injeção') = '', pg_temp.achou('injeção');
+insert into resultado select 'busca: só símbolos não acha tudo', pg_temp.achou('símbolos') = '', pg_temp.achou('símbolos');
+insert into resultado select 'busca: mais antigos primeiro', pg_temp.achou('antigos') = 'd4,d3,d1,d2,d5', pg_temp.achou('antigos');
+insert into resultado select 'busca: conta tudo e devolve a página',
+  (r->>'total')::int >= 7 and jsonb_array_length(r->'itens') = 2, r->>'total'
+  from (select buscar_comentarios('00000000-0000-4000-8000-0000000000c2', '{}', 2, 0) as r) x;
+do $$ begin
+  perform buscar_comentarios('00000000-0000-4000-8000-0000000000c2', '{"de":"ontem"}', 50, 0);
+  insert into resultado values ('busca: data inválida dá erro com motivo', false, 'aceitou');
+exception when others then insert into resultado values ('busca: data inválida dá erro com motivo', sqlerrm like 'Data inválida%', sqlerrm);
+end $$;
 do $$ begin
   update yt_comentarios set rascunho = 'Oi, Maria! Editado.', rascunho_editado = true, resposta = 'rascunho' where id = '00000000-0000-4000-8000-0000000000e1';
   insert into resultado values ('plataforma edita o rascunho', found, '');
@@ -285,6 +359,9 @@ insert into resultado select 'anonimizar apaga o que identifica o lead',
 insert into resultado select 'comentário anonimizado e resposta cancelada',
   texto like '[comentário anonimizado%' and autor_nome = 'Anonimizado' and autor_canal_id is null and resposta = 'ignorada' and rascunho = '[anonimizado]', resposta
   from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
+insert into resultado select 'busca não acha o comentário anonimizado pelo texto antigo',
+  not exists (select 1 from jsonb_array_elements(buscar_comentarios('00000000-0000-4000-8000-0000000000c2', '{"grupos":[{"termos":["quanto custa"],"procedimentos":[]}]}', 50, 0)->'itens') x
+              where x->>'id' = '00000000-0000-4000-8000-0000000000e1'), '';
 -- 0019: a estimativa socioeconômica é perfil da pessoa e sai; consulta e cirurgia ficam para o funil
 insert into resultado select 'anonimizar apaga a estimativa socioeconômica',
   socio_pct is null and socio_motivo is null and pct_em is not null and consulta_pct = 85 and cirurgia_pct = 70,

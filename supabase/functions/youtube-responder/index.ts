@@ -10,7 +10,10 @@
 // refazer: a IA escreve outra sugestão (com o pedido do médico, se houver).
 // aprender / pautas: a IA propõe (regras de treinamento, temas de vídeo); a
 //   equipe decide na tela o que fica.
+// buscar: a IA traduz a frase de busca em critérios; quem acha é o banco
+//   (buscar_comentarios, 0020) e a tela mostra os critérios para conferir.
 import { administra, admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
+import { interpretarBusca } from "../_shared/busca.ts";
 import { acharPautas, aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
 import { canalConectado, canalJaRespondeu, gastarCota, publicarResposta, tokenDeAcesso } from "../_shared/youtube.ts";
 
@@ -38,6 +41,16 @@ Deno.serve(async (req) => {
       if (!enxerga(eu, p.cliente_id)) throw new Falha("Cliente não encontrado.", 404);
       const r = await acharPautas(p.cliente_id);
       return responder({ ok: true, mensagem: `${r.pautas} pauta(s) a partir de ${r.analisados} pergunta(s) dos comentários.` });
+    }
+
+    // busca por frase (15/11/26): só traduz; não lê nem muda comentário
+    if (p.acao === "buscar") {
+      if (!ehUuid(p.cliente_id)) throw new Falha("Cliente inválido.");
+      if (!enxerga(eu, p.cliente_id)) throw new Falha("Cliente não encontrado.", 404);
+      const frase = String(p.texto ?? "").replace(/\s+/g, " ").trim();
+      if (frase.length < 2) throw new Falha("Escreva o que você quer buscar.");
+      if (frase.length > 300) throw new Falha("A busca passou de 300 caracteres; encurte a frase.");
+      return responder({ ok: true, ...(await interpretarBusca(p.cliente_id, frase)) });
     }
 
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");

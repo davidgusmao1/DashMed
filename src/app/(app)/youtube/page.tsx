@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
-import { dataHora } from "@/lib/conteudo";
-import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_CATEGORIA, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
+import { lerFiltroDaUrl, POR_PAGINA, usaPorcentagens } from "@/lib/busca-youtube";
+import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
 import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
+import BarraBusca from "./busca";
 import BuscarLead from "./buscar-lead";
 import Fila from "./fila";
 import FiltrosFila, { type ContagemFila, type FiltroFila } from "./filtros-fila";
+import ListaComentarios, { type ItemComentario } from "./lista-comentarios";
 import Pautas, { type Pauta } from "./pautas";
-import Porcentagens from "./porcentagens";
 import Quadro, { type CartaoLead } from "./quadro";
 import Resultados, { type Funil } from "./resultados";
+import ResultadosBusca from "./resultados-busca";
 import Varrer from "./varrer";
 
 // YouTube Seller (David, 12/11/26: "um social seller automatizado"): o robô
@@ -23,19 +25,17 @@ const ABAS = [
   { id: "comentarios", rotulo: "Comentários lidos" },
   { id: "resultados", rotulo: "Resultados" },
   { id: "pautas", rotulo: "Pautas de conteúdo" },
+  { id: "busca", rotulo: "Busca" },
 ] as const;
 
-const RESPOSTA: Record<string, string> = {
-  nenhuma: "sem resposta", redigir: "IA vai escrever", rascunho: "na fila", publicando: "publicando…",
-  publicada: "respondido", falhou: "na fila (problema)", ignorada: "ignorado",
-};
+type Parametros = { aba?: string; f?: string; proc?: string; video?: string; q?: string; b?: string; o?: string; p?: string };
 
-export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<{ aba?: string; f?: string; proc?: string; video?: string }> }) {
+export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<Parametros> }) {
   const eu = await usuarioAtual();
   if (!eu) return null;
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
-  const { aba: abaPedida, f, proc, video } = await searchParams;
+  const { aba: abaPedida, f, proc, video, q: frase, b, o: obs, p: paginaPedida } = await searchParams;
   const aba = ABAS.some((a) => a.id === abaPedida) ? abaPedida! : "fila";
   const supabase = await supabaseServidor();
 
@@ -144,35 +144,41 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
     conteudo = error || !data
       ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui montar o funil: {error?.message ?? "sem dados"}.</p>
       : <Resultados funil={data as Funil} />;
+  } else if (aba === "busca") {
+    // busca por frase (15/11/26): os critérios vêm na URL (a IA traduziu na barra)
+    const filtro = lerFiltroDaUrl(b);
+    if (!filtro) {
+      conteudo = (
+        <div className="cartao space-y-2 p-5 text-sm text-zinc-700">
+          <p className="font-semibold text-zinc-900">Escreva na barra acima o que você procura, do seu jeito.</p>
+          <p>Dá para misturar período (“semana passada”, “ontem”, “últimos 30 dias”), vídeo (“do vídeo da minha última quarta”), assunto (“que falam de prótese ou de dor”), tipo (“quem pediu para marcar”), porcentagens (“alta chance de cirurgia”) e ordem (“mais curtidos primeiro”).</p>
+          <p className="text-xs text-zinc-500">A IA traduz a frase em critérios; cada critério aparece numa etiqueta, e você tira o que não quiser.</p>
+          {b && <p className="text-xs text-zinc-900">Os critérios desta página vieram incompletos; faça a busca de novo.</p>}
+        </div>
+      );
+    } else {
+      const pagina = Math.min(Math.max(Number.parseInt(paginaPedida ?? "1", 10) || 1, 1), 200);
+      const [{ data, error }, { data: vids }, faltam] = await Promise.all([
+        supabase.rpc("buscar_comentarios", { p_cliente: emFoco.id, p_filtro: filtro, p_limite: POR_PAGINA, p_pular: (pagina - 1) * POR_PAGINA }),
+        filtro.videos?.length
+          ? supabase.from("yt_videos").select("video_id, titulo").eq("cliente_id", emFoco.id).in("video_id", filtro.videos)
+          : Promise.resolve({ data: [] as { video_id: string; titulo: string }[] }),
+        usaPorcentagens(filtro)
+          ? supabase.from("yt_comentarios").select("id", { count: "exact", head: true })
+            .eq("cliente_id", emFoco.id).eq("triagem", "feita").is("pct_em", null).is("deleted_at", null)
+          : Promise.resolve({ count: 0 }),
+      ]);
+      const res = (data ?? null) as { total: number; itens: ItemComentario[] } | null;
+      conteudo = error || !res
+        ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui buscar: {error?.message ?? "sem resposta do banco"}.</p>
+        : <ResultadosBusca q={frase ?? null} obs={obs ?? null} filtro={filtro} total={res.total} itens={res.itens} pagina={pagina}
+            titulos={Object.fromEntries((vids ?? []).map((v) => [v.video_id, v.titulo as string]))} faltamPorcentagens={faltam.count ?? 0} />;
+    }
   } else {
     const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, consulta_pct, cirurgia_pct, socio_pct, socio_motivo")
+      .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, conversa_de, consulta_pct, cirurgia_pct, socio_pct, socio_motivo")
       .eq("cliente_id", emFoco.id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(100);
-    conteudo = (
-      <div className="cartao divide-y divide-zinc-100">
-        {(data ?? []).length === 0 && <p className="p-5 text-sm text-zinc-500">Nenhum comentário lido ainda.</p>}
-        {(data ?? []).map((c) => (
-          <div key={c.id} className="space-y-1 p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
-              <b className="text-zinc-800">{c.autor_nome}</b>
-              <span>{dataHora(c.publicado_em)}</span>
-              {c.triagem === "feita" ? (
-                <>
-                  <span title="Chance de marcar consulta ou procedimento (decide quem vira lead)" className="rounded bg-teal-50 px-1 font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
-                  <Porcentagens c={c} />
-                  <span>{ROTULO_CATEGORIA[c.categoria ?? ""] ?? c.categoria}</span>
-                </>
-              ) : <span>{c.triagem === "erro" ? "triagem falhou" : "aguardando triagem"}</span>}
-              {c.urgente && <span className="font-semibold text-zinc-900">urgente</span>}
-              <span>· {c.ja_respondido && c.resposta !== "publicada" ? "você respondeu no YouTube" : RESPOSTA[c.resposta] ?? c.resposta}</span>
-              {c.lead_id && <Link href={`/youtube/leads/${c.lead_id}`} className="underline">lead</Link>}
-              <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="truncate hover:underline">{c.video_titulo ?? "vídeo"}</a>
-            </div>
-            <p className="line-clamp-3 text-zinc-800">{c.texto}</p>
-          </div>
-        ))}
-      </div>
-    );
+    conteudo = <ListaComentarios itens={(data ?? []) as ItemComentario[]} vazio="Nenhum comentário lido ainda." />;
   }
 
   return (
@@ -188,6 +194,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
         </div>
         <BuscarLead clienteId={emFoco.id} />
       </div>
+      <BarraBusca clienteId={emFoco.id} inicial={aba === "busca" ? frase ?? "" : ""} />
 
       {!pronto && (
         <div className="cartao space-y-1 p-4 text-sm">

@@ -1,5 +1,7 @@
 // Regras de texto do YouTube Seller (12/11/26). Roda em segundos:
 //   deno run --allow-read supabase/tests/youtube.ts
+import { calendarioDaBusca, limparFiltro } from "../functions/_shared/busca-regras.ts";
+import { etiquetasDoFiltro, filtroSoPalavras, lerFiltroDaUrl, normalizarFiltro, pedacosRealcados, regexDeRealce, semCriterio } from "../../src/lib/busca-youtube.ts";
 import { editouDeVerdade, garantirCodigo, mensagensDepoisDoCanal, palavrasChave, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink, videosParecidos } from "../functions/_shared/texto.ts";
 
 let falhas = 0;
@@ -76,6 +78,57 @@ confere("palavra rara pesa mais (luxação)", luxou[0]?.video_id === "v2", luxou
 confere("não indica o vídeo em que a pessoa está comentando", !videosParecidos("quando posso dirigir depois da prótese", catalogo, "v1").some((v) => v.video_id === "v1"));
 confere("palavra comum sozinha não basta (só 'quadril')", videosParecidos("Bom dia, meu quadril dói", catalogo, null).length === 0);
 confere("catálogo vazio não quebra", videosParecidos("qualquer coisa", [], null).length === 0);
+
+// busca por frase (15/11/26): o calendário que a IA usa e a limpeza dos critérios
+{
+  // domingo, 15/11/2026, 10h em Brasília (13h UTC)
+  const cal = calendarioDaBusca(new Date("2026-11-15T13:00:00Z"));
+  confere("calendário: hoje em Brasília", cal.hoje === "2026-11-15", cal.hoje);
+  confere("calendário: a última quarta", cal.ultimo["quarta"] === "2026-11-11", cal.ultimo["quarta"]);
+  confere("calendário: semana passada de segunda a domingo", cal.texto.includes("semana passada (segunda a domingo): de 2026-11-02 a 2026-11-08"));
+  confere("calendário: esta semana", cal.texto.includes("esta semana (segunda a hoje): de 2026-11-09 a 2026-11-15"));
+  confere("calendário: mês passado", cal.texto.includes("mês passado: de 2026-10-01 a 2026-10-31"));
+  // 23h30 de domingo em Brasília já é segunda em UTC: o dia é o de Brasília
+  const noite = calendarioDaBusca(new Date("2026-11-16T02:30:00Z"));
+  confere("calendário: fuso de Brasília perto da meia-noite", noite.hoje === "2026-11-15", noite.hoje);
+  // numa quarta, "a última quarta" é a da semana anterior
+  confere("calendário: na quarta, a última quarta é a anterior", calendarioDaBusca(new Date("2026-11-11T15:00:00Z")).ultimo["quarta"] === "2026-11-04");
+}
+{
+  const f = limparFiltro({
+    de: "2026-11-08", ate: "2026-11-02", grupos: [{ termos: ["prótese", ""], procedimentos: ["Prótese de quadril", "Inventado"] }, { termos: [], procedimentos: [] }],
+    todos: false, sem: [], categorias: ["preco", "xx"], videos: ["v1", "fora"], video_titulo: "", autor: " ", urgente: "sim", lead: "indiferente",
+    conversa: "nao", situacao: ["fila", "outra"], consulta_min: 70, consulta_max: -1, socio_min: 150, ordem: "estranha",
+  }, ["Prótese de quadril"], new Set(["v1"]), ["preco", "agendamento"]);
+  confere("limpeza: datas trocadas voltam à ordem", f.de === "2026-11-02" && f.ate === "2026-11-08");
+  confere("limpeza: procedimento e grupo vazios saem", f.grupos.length === 1 && f.grupos[0].procedimentos.join() === "Prótese de quadril" && f.grupos[0].termos.join() === "prótese");
+  confere("limpeza: só categoria, vídeo e situação conhecidos", f.categorias.join() === "preco" && f.videos.join() === "v1" && f.situacao.join() === "fila");
+  confere("limpeza: sim/não/indiferente", f.urgente === true && f.lead === null && f.conversa === false);
+  confere("limpeza: -1 e fora de 0–100 = sem limite", f.consulta_min === 70 && f.consulta_max === undefined && f.socio_min === undefined);
+  confere("limpeza: ordem desconhecida vira recentes", f.ordem === "recentes");
+}
+{
+  const n = normalizarFiltro({ de: null, ate: "", grupos: [{ termos: ["dor"], procedimentos: [] }], todos: true, urgente: null, consulta_min: 0, video_titulo: null });
+  confere("URL: tira o vazio e o todos de um grupo só", JSON.stringify(n) === '{"grupos":[{"termos":["dor"],"procedimentos":[]}],"consulta_min":0}', JSON.stringify(n));
+  confere("URL: sem critério = nada", normalizarFiltro({ de: null, grupos: [] }) === null && lerFiltroDaUrl("{quebrado") === null);
+  const dois = normalizarFiltro({ grupos: [{ termos: ["prótese"], procedimentos: [] }, { termos: ["dor"], procedimentos: [] }], todos: true, de: "2026-11-02", ate: "2026-11-08" })!;
+  const sem1 = semCriterio(dois, "grupo:0")!;
+  confere("etiqueta: tirar um assunto tira o 'todos'", sem1.grupos!.length === 1 && sem1.todos === undefined && sem1.de === "2026-11-02");
+  confere("etiqueta: tirar a data", semCriterio(dois, "data")!.de === undefined);
+  const et = etiquetasDoFiltro(dois, { videos: {}, categorias: {} }).map((e) => e.texto);
+  confere("etiqueta: textos", et[0] === "Comentados de 02/11/2026 a 08/11/2026" && et[1] === "Fala de: prótese" && et[2] === "E também de: dor", et.join(" | "));
+  confere("etiqueta: um dia diz o dia da semana", etiquetasDoFiltro({ de: "2026-11-11", ate: "2026-11-11" }, { videos: {}, categorias: {} })[0].texto === "Comentados em 11/11/2026 (quarta)");
+}
+{
+  const rx = regexDeRealce({ grupos: [{ termos: ["protese", "dor", "infiltr*"], procedimentos: [] }] });
+  const marcados = (t: string) => pedacosRealcados(t, rx).filter((p) => p.marca).map((p) => p.t).join(",");
+  confere("realce: sem ligar para acento", marcados("Minha Prótese ficou ótima") === "Prótese");
+  confere("realce: palavra inteira (doutor e adorei não)", marcados("Doutor, adorei! Mas a dor continua") === "dor");
+  confere("realce: prefixo pega a palavra toda", marcados("Fiz infiltração ontem") === "infiltração");
+  confere("realce: sem termo não marca nada", pedacosRealcados("texto", regexDeRealce({ de: "2026-11-01" })).length === 1);
+  const so = filtroSoPalavras("comentários que falam de Prótese e dor");
+  confere("sem a IA: busca pelas palavras", JSON.stringify(so?.grupos?.map((g) => g.termos[0])) === '["protese","dor"]' && so?.todos === true, JSON.stringify(so));
+}
 
 if (falhas) {
   console.error(`\n${falhas} regra(s) falharam.`);
