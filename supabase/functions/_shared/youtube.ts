@@ -154,10 +154,16 @@ type Thread = {
 };
 
 /** Uma página (até 100) de conversas do canal, da mais nova para a mais antiga. */
-export async function lerPagina(token: string, canalId: string, pagina: string | null): Promise<{ itens: ComentarioLido[]; proxima: string | null }> {
-  const q = new URLSearchParams({
-    part: "snippet,replies", allThreadsRelatedToChannelId: canalId, maxResults: "100", order: "time", textFormat: "plainText",
-  });
+/** Uma página (até 100) de comentários do canal, do mais novo ao mais antigo.
+ *  Na busca (15/11/26), pode ser de um vídeo só (videoId) e só os que têm a
+ *  palavra (searchTerms, quem filtra é o YouTube). 1 unidade de cota. */
+export async function lerPagina(
+  token: string, canalId: string, pagina: string | null, filtro: { videoId?: string; termo?: string } = {},
+): Promise<{ itens: ComentarioLido[]; proxima: string | null }> {
+  const q = new URLSearchParams({ part: "snippet,replies", maxResults: "100", order: "time", textFormat: "plainText" });
+  if (filtro.videoId) q.set("videoId", filtro.videoId);
+  else q.set("allThreadsRelatedToChannelId", canalId);
+  if (filtro.termo) q.set("searchTerms", filtro.termo);
   if (pagina) q.set("pageToken", pagina);
   const r = await yt<{ items?: Thread[]; nextPageToken?: string }>(token, `/commentThreads?${q}`);
   const itens = (r.items ?? []).filter((t) => t.snippet?.topLevelComment?.snippet?.publishedAt).map((t) => {

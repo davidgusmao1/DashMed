@@ -21,7 +21,8 @@ import {
   responder, respostaDeErro,
 } from "../_shared/base.ts";
 import { type Avaliacao, carregarConfig, estimarPorcentagens, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
-import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, titulosDosVideos, tokenDeAcesso, type ComentarioLido, videosDoCanal } from "../_shared/youtube.ts";
+import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, tokenDeAcesso, type ComentarioLido, videosDoCanal } from "../_shared/youtube.ts";
+import { gravarLidos, semBloqueados } from "../_shared/leitura.ts";
 import { mensagensDepoisDoCanal } from "../_shared/texto.ts";
 
 const MAX_PASSOS = 16;
@@ -63,46 +64,6 @@ async function contar(clienteId: string, campo: "triagem" | "resposta", valor: s
 function semPorcentagens(clienteId: string, campos: string, cabeca = false) {
   return admin.from("yt_comentarios").select(campos, cabeca ? { count: "exact", head: true } : undefined)
     .eq("cliente_id", clienteId).eq("triagem", "feita").is("pct_em", null).is("deleted_at", null);
-}
-
-/** sha256 de "cliente:canal", igual a hash_autor_youtube() da 0018. */
-async function hashAutor(clienteId: string, autor: string): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${clienteId}:${autor}`));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Quem pediu para ser anonimizado (LGPD, 0018) não volta a ser lido: tira
- *  da lista os comentários de canais em yt_bloqueados. */
-async function semBloqueados<T extends { autor_canal_id: string | null }>(clienteId: string, itens: T[]): Promise<T[]> {
-  if (!itens.length) return itens;
-  const { data, error } = await admin.from("yt_bloqueados").select("autor_hash").eq("cliente_id", clienteId).limit(10000);
-  if (error) throw new Falha(`Não consegui conferir os pedidos de anonimização (${error.message}).`, 500);
-  const bloqueados = new Set((data ?? []).map((b) => b.autor_hash as string));
-  if (!bloqueados.size) return itens;
-  const ficam: T[] = [];
-  for (const i of itens) {
-    if (i.autor_canal_id && bloqueados.has(await hashAutor(clienteId, i.autor_canal_id))) continue;
-    ficam.push(i);
-  }
-  return ficam;
-}
-
-/** Grava os comentários lidos (o mesmo comentário não entra duas vezes). */
-async function gravarLidos(clienteId: string, canalId: string, token: string, itens: ComentarioLido[]): Promise<number> {
-  // comentário do próprio canal não é lead
-  const deFora = await semBloqueados(clienteId, itens.filter((c) => c.autor_canal_id !== canalId && c.texto.trim()));
-  if (!deFora.length) return 0;
-  const videos = [...new Set(deFora.map((c) => c.video_id).filter(Boolean))];
-  let titulos = new Map<string, string>();
-  if (videos.length) {
-    await gastarCota(clienteId, Math.ceil(videos.length / 50));
-    titulos = await titulosDosVideos(token, videos);
-  }
-  const linhas = deFora.map((c) => ({ cliente_id: clienteId, canal_id: canalId, ...c, video_titulo: titulos.get(c.video_id) ?? null }));
-  const { data, error } = await admin.from("yt_comentarios")
-    .upsert(linhas, { onConflict: "cliente_id,thread_id", ignoreDuplicates: true }).select("id");
-  if (error) throw new Falha(`Não consegui gravar os comentários lidos (${error.message}).`, 500);
-  return data?.length ?? 0;
 }
 
 async function lerNovos(v: Varredura, canalId: string, token: string): Promise<string> {

@@ -103,3 +103,37 @@ export function limparFiltro(r: Record<string, unknown>, procedimentos: string[]
   return f;
 }
 
+
+// ── busca direto no YouTube (15/11/26: "a minha intenção é que ela busque
+// comentários do YouTube") ───────────────────────────────────────────────
+// O YouTube só filtra por palavra (searchTerms) e por vídeo; o período sai de
+// paginar do mais novo ao mais antigo. O resto (tipo, porcentagens...) é da
+// triagem do DashMed e o banco aplica depois.
+export type PlanoYoutube = { termos: string[]; cortados: number; de: string | null; ate: string | null };
+
+/** Critérios (formato da URL) → o que pedir ao YouTube. Com "todos os
+ *  assuntos", basta buscar as palavras do assunto com menos palavras (todo
+ *  comentário achado tem de ter uma delas); o banco confere o resto. */
+export function planoNoYoutube(f: Record<string, unknown>, maxTermos = 12): PlanoYoutube {
+  const data = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) ? v : null);
+  const grupos = (Array.isArray(f.grupos) ? f.grupos : [])
+    .map((g) => (Array.isArray((g as Record<string, unknown>)?.termos) ? (g as Record<string, unknown>).termos as unknown[] : [])
+      .map((t) => String(t ?? "").replace(/\*+$/, "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 40))
+      .filter((t) => t.length >= 2))
+    .filter((g) => g.length);
+  const escolhidos = f.todos === true && grupos.length > 1 ? [grupos.reduce((a, b) => (b.length < a.length ? b : a))] : grupos;
+  // um de cada assunto por vez, para o corte não deixar um assunto de fora
+  const todos: string[] = [];
+  for (let i = 0; escolhidos.some((g) => i < g.length); i++) {
+    for (const g of escolhidos) if (i < g.length && !todos.includes(g[i])) todos.push(g[i]);
+  }
+  const de = data(f.de);
+  const ate = data(f.ate);
+  return {
+    termos: todos.slice(0, maxTermos),
+    cortados: Math.max(0, todos.length - maxTermos),
+    // Brasília sem horário de verão desde 2019: -03:00
+    de: de ? new Date(`${de}T00:00:00-03:00`).toISOString() : null,
+    ate: ate ? new Date(`${ate}T23:59:59.999-03:00`).toISOString() : null,
+  };
+}

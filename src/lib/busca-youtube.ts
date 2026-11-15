@@ -93,11 +93,35 @@ export function lerFiltroDaUrl(b: string | undefined): FiltroBusca | null {
   }
 }
 
-export function hrefBusca(p: { q?: string | null; filtro: FiltroBusca | null; obs?: string | null; pagina?: number }): string {
+/** O que a busca direto no YouTube trouxe (edge youtube-responder, ação
+ *  buscar_youtube), ou o motivo de não ter buscado. Vai na URL (yt=) junto com
+ *  os critérios para os quais foi feita; mexeu nos critérios, sai. */
+export type ResumoYoutube =
+  | { achados: number; novos: number; paginas: number; limite: string[]; aviso: string | null }
+  | { erro: string };
+
+export function lerResumoYoutube(yt: string | undefined): ResumoYoutube | null {
+  if (!yt) return null;
+  try {
+    const r = JSON.parse(yt) as Record<string, unknown>;
+    if (typeof r.erro === "string") return { erro: r.erro.slice(0, 400) };
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Math.max(0, Math.round(Number(v))) : 0);
+    return {
+      achados: n(r.achados), novos: n(r.novos), paginas: n(r.paginas),
+      limite: (Array.isArray(r.limite) ? r.limite : []).map(String).slice(0, 8),
+      aviso: typeof r.aviso === "string" ? r.aviso.slice(0, 600) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function hrefBusca(p: { q?: string | null; filtro: FiltroBusca | null; obs?: string | null; pagina?: number; yt?: ResumoYoutube | null }): string {
   const u = new URLSearchParams({ aba: "busca" });
   if (p.q) u.set("q", p.q);
   if (p.filtro) u.set("b", JSON.stringify(p.filtro));
   if (p.obs) u.set("o", p.obs);
+  if (p.yt) u.set("yt", JSON.stringify(p.yt));
   if (p.pagina && p.pagina > 1) u.set("p", String(p.pagina));
   return `/youtube?${u.toString()}`;
 }

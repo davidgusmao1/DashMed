@@ -12,12 +12,17 @@
 //   equipe decide na tela o que fica.
 // buscar: a IA traduz a frase de busca em critérios; quem acha é o banco
 //   (buscar_comentarios, 0020) e a tela mostra os critérios para conferir.
+// buscar_youtube: com os critérios, busca direto no YouTube e grava no DashMed
+//   o que ainda não estava (só lê; não responde nada).
 import { administra, admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
-import { interpretarBusca } from "../_shared/busca.ts";
+import { buscarNoYoutube, interpretarBusca } from "../_shared/busca.ts";
 import { acharPautas, aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
 import { canalConectado, canalJaRespondeu, gastarCota, publicarResposta, tokenDeAcesso } from "../_shared/youtube.ts";
 
-type Pedido = { acao?: string; comentario_id?: string; cliente_id?: string; texto?: string; instrucao?: string; sobrescrever?: boolean };
+type Pedido = {
+  acao?: string; comentario_id?: string; cliente_id?: string; texto?: string; instrucao?: string; sobrescrever?: boolean;
+  filtro?: Record<string, unknown>;
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -51,6 +56,15 @@ Deno.serve(async (req) => {
       if (frase.length < 2) throw new Falha("Escreva o que você quer buscar.");
       if (frase.length > 300) throw new Falha("A busca passou de 300 caracteres; encurte a frase.");
       return responder({ ok: true, ...(await interpretarBusca(p.cliente_id, frase)) });
+    }
+
+    // busca direto no YouTube (15/11/26): pergunta ao YouTube com os critérios
+    // e grava no DashMed o que ainda não estava; a tela busca no banco depois
+    if (p.acao === "buscar_youtube") {
+      if (!ehUuid(p.cliente_id)) throw new Falha("Cliente inválido.");
+      if (!enxerga(eu, p.cliente_id)) throw new Falha("Cliente não encontrado.", 404);
+      if (!p.filtro || typeof p.filtro !== "object" || Array.isArray(p.filtro)) throw new Falha("Critérios de busca inválidos.");
+      return responder({ ok: true, youtube: await buscarNoYoutube(p.cliente_id, p.filtro) });
     }
 
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");

@@ -3,13 +3,54 @@
 // queria (regras 3 e 4). Sem "use client": roda no servidor.
 import Link from "next/link";
 import { X } from "lucide-react";
-import { etiquetasDoFiltro, type FiltroBusca, hrefBusca, POR_PAGINA, regexDeRealce, semCriterio } from "@/lib/busca-youtube";
+import { etiquetasDoFiltro, type FiltroBusca, hrefBusca, POR_PAGINA, regexDeRealce, type ResumoYoutube, semCriterio } from "@/lib/busca-youtube";
 import { ROTULO_CATEGORIA } from "@/lib/youtube";
+import { BotaoBuscarNoYoutube } from "./busca";
 import ListaComentarios, { type ItemComentario } from "./lista-comentarios";
 
+/** O que a busca direto no YouTube fez, ou por que não fez (regra 2). */
+function NoYoutube({ yt, clienteId, q, filtro, obs }: { yt: ResumoYoutube | null; clienteId: string; q: string | null; filtro: FiltroBusca; obs: string | null }) {
+  const botao = (rotulo: string) => <BotaoBuscarNoYoutube clienteId={clienteId} q={q} filtro={filtro} obs={obs} rotulo={rotulo} />;
+  if (!yt) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+        <span>Os critérios mudaram depois da busca no YouTube: a lista mostra só o que já está no DashMed.</span>
+        {botao("Buscar também no YouTube")}
+      </div>
+    );
+  }
+  if ("erro" in yt) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-900">
+        <span>Não consegui buscar no YouTube agora: {yt.erro} A lista mostra só o que já estava no DashMed.</span>
+        {botao("Tentar no YouTube de novo")}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1 text-xs text-zinc-600">
+      {yt.paginas > 0 && (
+        <p>
+          <b className="text-zinc-900">No YouTube agora:</b> {yt.achados} comentário(s) com essas palavras, vídeo ou período
+          {yt.achados > 0 && (yt.novos ? `; ${yt.novos} ainda não estavam no DashMed e foram trazidos.` : "; todos já estavam no DashMed.")}
+          {" "}A lista abaixo junta tudo e aplica todos os critérios.
+        </p>
+      )}
+      {yt.aviso && <p>{yt.aviso}</p>}
+      {yt.limite.length > 0 && (
+        <p>Parei no limite de páginas em: {yt.limite.join(", ")}. Há comentários mais antigos no YouTube; diga um período (“em 2025”, “em março”) para ir mais fundo.</p>
+      )}
+      {yt.novos > 0 && (
+        <p>Os que vieram agora aparecem como “aguardando triagem”: a IA tria na próxima varredura (botão Varrer agora). Até lá, tipo, porcentagens e lead não valem para eles.</p>
+      )}
+      <div>{botao("Buscar no YouTube de novo")}</div>
+    </div>
+  );
+}
+
 export default function ResultadosBusca(p: {
-  q: string | null; obs: string | null; filtro: FiltroBusca; total: number; itens: ItemComentario[]; pagina: number;
-  titulos: Record<string, string>; faltamPorcentagens: number; videoSemComentario: boolean;
+  clienteId: string; q: string | null; obs: string | null; filtro: FiltroBusca; total: number; itens: ItemComentario[]; pagina: number;
+  titulos: Record<string, string>; faltamPorcentagens: number; videoSemComentario: boolean; yt: ResumoYoutube | null;
 }) {
   const etiquetas = etiquetasDoFiltro(p.filtro, { videos: p.titulos, categorias: ROTULO_CATEGORIA });
   const paginas = Math.max(1, Math.ceil(p.total / POR_PAGINA));
@@ -40,6 +81,7 @@ export default function ResultadosBusca(p: {
           )}
         </div>
         {p.obs && <p className="text-xs text-zinc-600">{p.obs}</p>}
+        <NoYoutube yt={p.yt} clienteId={p.clienteId} q={p.q} filtro={p.filtro} obs={p.obs} />
         {p.faltamPorcentagens > 0 && (
           <p className="text-xs text-zinc-600">
             {p.faltamPorcentagens} comentário(s) antigo(s) ainda não têm as porcentagens (a varredura calcula aos poucos) e ficam de fora dos critérios de consulta, cirurgia e socioeconômica.
@@ -51,14 +93,16 @@ export default function ResultadosBusca(p: {
         <b>{p.total === 0 ? "Nenhum comentário encontrado" : `${p.total} comentário(s) encontrado(s)`}</b>
         {p.total > POR_PAGINA && <span className="text-xs text-zinc-500">Mostrando {primeiro}–{ultimo}</span>}
       </div>
-      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} vazio={p.videoSemComentario
-        ? "A varredura ainda não leu nenhum comentário deste vídeo. Se ele é novo, rode a varredura; se foi uma live, a conversa ao vivo fica no chat, não nos comentários. Se você queria outro vídeo, diga qual (ex.: “Quarta do Quadril #223”)."
-        : "Tire um critério (no × da etiqueta) ou escreva a busca de outro jeito."} />
+      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} vazio={!p.videoSemComentario
+        ? "Tire um critério (no × da etiqueta) ou escreva a busca de outro jeito."
+        : p.yt && !("erro" in p.yt)
+          ? "Este vídeo não tem comentário, nem no YouTube nem no DashMed. Se foi uma live, a conversa ao vivo fica no chat, não nos comentários. Se você queria outro vídeo, diga qual (ex.: “Quarta do Quadril #223”)."
+          : "O DashMed ainda não tem comentário deste vídeo. Busque no YouTube (botão acima); se foi uma live, a conversa ao vivo fica no chat, não nos comentários."} />
       {paginas > 1 && (
         <div className="flex items-center justify-between text-sm">
-          {p.pagina > 1 ? <Link className="botao-claro" href={hrefBusca({ q: p.q, filtro: p.filtro, obs: p.obs, pagina: p.pagina - 1 })}>← Anteriores</Link> : <span />}
+          {p.pagina > 1 ? <Link className="botao-claro" href={hrefBusca({ q: p.q, filtro: p.filtro, obs: p.obs, pagina: p.pagina - 1, yt: p.yt })}>← Anteriores</Link> : <span />}
           <span className="text-xs text-zinc-500">Página {p.pagina} de {paginas}</span>
-          {p.pagina < paginas ? <Link className="botao-claro" href={hrefBusca({ q: p.q, filtro: p.filtro, obs: p.obs, pagina: p.pagina + 1 })}>Próximos →</Link> : <span />}
+          {p.pagina < paginas ? <Link className="botao-claro" href={hrefBusca({ q: p.q, filtro: p.filtro, obs: p.obs, pagina: p.pagina + 1, yt: p.yt })}>Próximos →</Link> : <span />}
         </div>
       )}
     </div>

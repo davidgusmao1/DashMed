@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
-import { lerFiltroDaUrl, POR_PAGINA, usaPorcentagens } from "@/lib/busca-youtube";
+import { lerFiltroDaUrl, lerResumoYoutube, POR_PAGINA, usaPorcentagens } from "@/lib/busca-youtube";
 import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
 import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
@@ -28,14 +28,14 @@ const ABAS = [
   { id: "busca", rotulo: "Busca" },
 ] as const;
 
-type Parametros = { aba?: string; f?: string; proc?: string; video?: string; q?: string; b?: string; o?: string; p?: string };
+type Parametros = { aba?: string; f?: string; proc?: string; video?: string; q?: string; b?: string; o?: string; p?: string; yt?: string };
 
 export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<Parametros> }) {
   const eu = await usuarioAtual();
   if (!eu) return null;
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
-  const { aba: abaPedida, f, proc, video, q: frase, b, o: obs, p: paginaPedida } = await searchParams;
+  const { aba: abaPedida, f, proc, video, q: frase, b, o: obs, p: paginaPedida, yt } = await searchParams;
   const aba = ABAS.some((a) => a.id === abaPedida) ? abaPedida! : "fila";
   const supabase = await supabaseServidor();
 
@@ -150,7 +150,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
     if (!filtro) {
       conteudo = (
         <div className="cartao space-y-2 p-5 text-sm text-zinc-700">
-          <p className="font-semibold text-zinc-900">Escreva na barra acima o que você procura, do seu jeito.</p>
+          <p className="font-semibold text-zinc-900">Escreva na barra acima o que você procura, do seu jeito. A busca vai direto ao YouTube e junta com o que já está no DashMed.</p>
           <p>Dá para misturar período (“semana passada”, “ontem”, “últimos 30 dias”), vídeo (“do vídeo da minha última quarta”), assunto (“que falam de prótese ou de dor”), tipo (“quem pediu para marcar”), porcentagens (“alta chance de cirurgia”) e ordem (“mais curtidos primeiro”).</p>
           <p className="text-xs text-zinc-500">A IA traduz a frase em critérios; cada critério aparece numa etiqueta, e você tira o que não quiser.</p>
           {b && <p className="text-xs text-zinc-900">Os critérios desta página vieram incompletos; faça a busca de novo.</p>}
@@ -178,7 +178,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       }
       conteudo = error || !res
         ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui buscar: {error?.message ?? "sem resposta do banco"}.</p>
-        : <ResultadosBusca q={frase ?? null} obs={obs ?? null} filtro={filtro} total={res.total} itens={res.itens} pagina={pagina}
+        : <ResultadosBusca clienteId={emFoco.id} yt={lerResumoYoutube(yt)} q={frase ?? null} obs={obs ?? null} filtro={filtro} total={res.total} itens={res.itens} pagina={pagina}
             titulos={Object.fromEntries((vids ?? []).map((v) => [v.video_id, v.titulo as string]))} faltamPorcentagens={faltam.count ?? 0}
             videoSemComentario={videoSemComentario} />;
     }

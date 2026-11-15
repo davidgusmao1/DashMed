@@ -1,6 +1,6 @@
 // Regras de texto do YouTube Seller (12/11/26). Roda em segundos:
 //   deno run --allow-read supabase/tests/youtube.ts
-import { calendarioDaBusca, limparFiltro } from "../functions/_shared/busca-regras.ts";
+import { calendarioDaBusca, limparFiltro, planoNoYoutube } from "../functions/_shared/busca-regras.ts";
 import { etiquetasDoFiltro, filtroSoPalavras, lerFiltroDaUrl, normalizarFiltro, pedacosRealcados, regexDeRealce, semCriterio } from "../../src/lib/busca-youtube.ts";
 import { editouDeVerdade, garantirCodigo, mensagensDepoisDoCanal, palavrasChave, problemaNaResposta, telefonesDoTexto, telefonesInventados, temLink, videosParecidos } from "../functions/_shared/texto.ts";
 
@@ -128,6 +128,19 @@ confere("catálogo vazio não quebra", videosParecidos("qualquer coisa", [], nul
   confere("realce: sem termo não marca nada", pedacosRealcados("texto", regexDeRealce({ de: "2026-11-01" })).length === 1);
   const so = filtroSoPalavras("comentários que falam de Prótese e dor");
   confere("sem a IA: busca pelas palavras", JSON.stringify(so?.grupos?.map((g) => g.termos[0])) === '["protese","dor"]' && so?.todos === true, JSON.stringify(so));
+}
+
+// busca direto no YouTube: o que pedir ao YouTube
+{
+  const p = planoNoYoutube({ de: "2026-11-02", ate: "2026-11-08", grupos: [{ termos: ["Prótese", "protese", "artroplastia"] }, { termos: ["dor", "dores"] }] });
+  confere("YouTube: um termo de cada assunto por vez", p.termos.join() === "prótese,dor,protese,dores,artroplastia", p.termos.join());
+  confere("YouTube: período em Brasília", p.de === "2026-11-02T03:00:00.000Z" && p.ate === "2026-11-09T02:59:59.999Z", `${p.de} ${p.ate}`);
+  const t = planoNoYoutube({ todos: true, grupos: [{ termos: ["prótese", "protese", "artroplastia"] }, { termos: ["dor", "dores"] }] });
+  confere("YouTube: com todos os assuntos, só o menor grupo", t.termos.join() === "dor,dores", t.termos.join());
+  const c = planoNoYoutube({ grupos: [{ termos: ["infiltr*", " a ", "x".repeat(60)] }] }, 2);
+  confere("YouTube: tira o *, curto e longo demais", c.termos[0] === "infiltr" && c.termos.length === 2 && c.termos[1].length === 40 && c.cortados === 0, JSON.stringify(c));
+  confere("YouTube: corte avisado", planoNoYoutube({ grupos: [{ termos: ["aa", "bb", "cc"] }] }, 2).cortados === 1);
+  confere("YouTube: sem palavra nem data, plano vazio", planoNoYoutube({ consulta_min: 70 }).termos.length === 0 && planoNoYoutube({}).de === null);
 }
 
 if (falhas) {
