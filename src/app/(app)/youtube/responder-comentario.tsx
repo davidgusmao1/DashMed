@@ -131,7 +131,7 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
     setPedindo(false);
     setInstrucao("");
     setTrocar(false);
-    setAviso({ ok: true, texto: "A IA escreveu a sugestão abaixo. Ela também ficou em “Respostas para revisar”; nada foi publicado." });
+    setAviso({ ok: true, texto: "A IA escreveu a sugestão; revise antes de publicar. Ela também ficou em “Respostas para revisar”; nada foi publicado." });
     router.refresh();
   }
 
