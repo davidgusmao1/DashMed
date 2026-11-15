@@ -58,7 +58,8 @@ export default function ListaComentarios({ itens, realce = null, vazio, acoes }:
     <div className="cartao divide-y divide-zinc-100">
       {itens.length === 0 && <p className="p-5 text-sm text-zinc-500">{vazio}</p>}
       {itens.map((c) => (
-        <div key={c.id} className="space-y-1 p-3 text-sm">
+        // barra verde (0021): resposta pronta na fila, revisada ou mandada daqui
+        <div key={c.id} className={`space-y-1 p-3 text-sm ${c.revisada_em && c.resposta === "rascunho" ? "border-l-4 border-l-emerald-500" : ""}`}>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
             <b className="text-zinc-800">{c.autor_nome}</b>
             <span>{dataHora(c.publicado_em)}</span>
@@ -71,7 +72,8 @@ export default function ListaComentarios({ itens, realce = null, vazio, acoes }:
             ) : <span>{c.triagem === "erro" ? "triagem falhou" : "aguardando triagem"}</span>}
             {c.urgente && <span className="font-semibold text-zinc-900">urgente</span>}
             {c.conversa_de && <span className="font-semibold text-zinc-800">↳ continuação da conversa</span>}
-            <span>· {c.ja_respondido && c.resposta !== "publicada" ? "você respondeu no YouTube" : RESPOSTA[c.resposta] ?? c.resposta}</span>
+            <span>· {c.ja_respondido && c.resposta !== "publicada" ? "você respondeu no YouTube"
+              : c.revisada_em && c.resposta === "rascunho" ? "na fila, revisada" : RESPOSTA[c.resposta] ?? c.resposta}</span>
             {c.lead_id && <Link href={`/youtube/leads/${c.lead_id}`} className="underline">{c.codigo ? `lead ${c.codigo}` : "lead"}</Link>}
             <a href={LINK_VIDEO(c.video_id, c.comentario_id)} target="_blank" rel="noreferrer" className="truncate hover:underline">{c.video_titulo ?? "vídeo"}</a>
           </div>

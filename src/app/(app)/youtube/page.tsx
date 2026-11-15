@@ -29,7 +29,7 @@ const ABAS = [
 ] as const;
 
 // o que os botões de responder (responder-comentario.tsx) precisam além do que a lista mostra
-const CAMPOS_RESPONDER = "thread_id, pode_responder, rascunho, rascunho_editado, sugestao_ia, resposta_msg, video_sugerido, publicada_em";
+const CAMPOS_RESPONDER = "thread_id, pode_responder, rascunho, rascunho_editado, sugestao_ia, resposta_msg, video_sugerido, publicada_em, revisada_em";
 
 /** O título do vídeo do canal que a IA indicou em cada resposta (0017). */
 async function titulosIndicados(supabase: Awaited<ReturnType<typeof supabaseServidor>>, clienteId: string, itens: { video_sugerido?: string | null }[]) {
@@ -64,7 +64,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
   let conteudo: React.ReactNode = null;
   if (aba === "fila") {
     // a fila inteira, leve, só para contar os filtros (fila passa de 1.000? então já é outro problema)
-    const { data: toda } = await supabase.from("yt_comentarios").select("urgente, conversa_de, procedimentos, video_id, video_titulo")
+    const { data: toda } = await supabase.from("yt_comentarios").select("urgente, conversa_de, procedimentos, video_id, video_titulo, revisada_em, resposta")
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null).limit(1000);
     const procs = new Map<string, number>();
     const vids = new Map<string, { id: string; titulo: string; n: number }>();
@@ -78,20 +78,23 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       total: (toda ?? []).length,
       urgentes: (toda ?? []).filter((c) => c.urgente).length,
       conversas: (toda ?? []).filter((c) => c.conversa_de).length,
+      revisadas: (toda ?? []).filter((c) => c.revisada_em && c.resposta === "rascunho").length,
       procedimentos: [...procs].sort((a, b) => b[1] - a[1]),
       videos: [...vids.values()].sort((a, b) => b.n - a.n),
     };
     const filtro: FiltroFila = {
-      f: f === "urgente" || f === "conversa" ? f : "",
+      f: f === "urgente" || f === "conversa" || f === "revisada" ? f : "",
       proc: proc && procs.has(proc) ? proc : "",
       video: video && vids.has(video) ? video : "",
       ordem: ORDENS_FILA.find((o) => o.id === ordem)?.id ?? "",
     };
     let q = supabase.from("yt_comentarios")
-      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido, consulta_pct, cirurgia_pct, socio_pct, socio_motivo", { count: "exact" })
+      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido, consulta_pct, cirurgia_pct, socio_pct, socio_motivo, revisada_em", { count: "exact" })
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null);
     if (filtro.f === "urgente") q = q.eq("urgente", true);
     if (filtro.f === "conversa") q = q.not("conversa_de", "is", null);
+    // barra verde (0021): as revisadas e as que vieram prontas da busca
+    if (filtro.f === "revisada") q = q.eq("resposta", "rascunho").not("revisada_em", "is", null);
     // literal de array com aspas: o nome do procedimento tem espaço e parênteses
     if (filtro.proc) q = q.filter("procedimentos", "cs", `{"${filtro.proc.replace(/["\\]/g, "\\$&")}"}`);
     if (filtro.video) q = q.eq("video_id", filtro.video);
@@ -209,7 +212,12 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
     const { data } = await supabase.from("yt_comentarios")
       .select(`id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, conversa_de, consulta_pct, cirurgia_pct, socio_pct, socio_motivo, ${CAMPOS_RESPONDER}`)
       .eq("cliente_id", emFoco.id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(100);
-    const itens = (data ?? []) as unknown as ItemComentario[];
+    const lidos = (data ?? []) as unknown as ItemComentario[];
+    // o código do lead aparece ao lado e no editor da resposta (0021)
+    const leadIds = [...new Set(lidos.map((c) => c.lead_id).filter(Boolean))] as string[];
+    const { data: codigos } = leadIds.length ? await supabase.from("leads").select("id, codigo").in("id", leadIds) : { data: [] };
+    const codigoDe = new Map((codigos ?? []).map((l) => [l.id as string, l.codigo as string]));
+    const itens = lidos.map((c) => ({ ...c, codigo: c.lead_id ? codigoDe.get(c.lead_id) ?? null : null }));
     conteudo = <ListaComentarios itens={itens} vazio="Nenhum comentário lido ainda."
       acoes={{ canal: canal?.canal_titulo ?? "seu canal", clienteId: emFoco.id, titulosVideos: await titulosIndicados(supabase, emFoco.id, itens) }} />;
   }

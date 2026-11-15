@@ -11,10 +11,12 @@ export type ContagemFila = {
   total: number;
   urgentes: number;
   conversas: number;
+  /** com a barra verde (0021) */
+  revisadas: number;
   procedimentos: [string, number][];
   videos: { id: string; titulo: string; n: number }[];
 };
-export type FiltroFila = { f: "" | "urgente" | "conversa"; proc: string; video: string; ordem: OrdemFila };
+export type FiltroFila = { f: "" | "urgente" | "conversa" | "revisada"; proc: string; video: string; ordem: OrdemFila };
 
 function url(filtro: FiltroFila) {
   const p = new URLSearchParams({ aba: "fila" });
@@ -31,6 +33,7 @@ export default function FiltrosFila({ contagem, filtro }: { contagem: ContagemFi
     ["", "Todas", contagem.total],
     ["urgente", "Urgentes", contagem.urgentes],
     ["conversa", "Continuação de conversa", contagem.conversas],
+    ["revisada", "Revisadas", contagem.revisadas],
   ];
   const algum = filtro.f || filtro.proc || filtro.video;
 
@@ -39,6 +42,7 @@ export default function FiltrosFila({ contagem, filtro }: { contagem: ContagemFi
       {chips.map(([f, rotulo, n]) => (
         <Link key={f || "todas"} href={url({ ...filtro, f })} aria-current={filtro.f === f ? "true" : undefined}
           className={`rounded-full border px-3 py-1 ${filtro.f === f ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}>
+          {f === "revisada" && <span aria-hidden className="mr-1.5 inline-block h-3 w-1 rounded-full bg-emerald-500 align-[-1px]" />}
           {rotulo} <span className="tabular-nums opacity-70">{n}</span>
         </Link>
       ))}

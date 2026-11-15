@@ -75,6 +75,8 @@ export type Comentario = {
   resposta_msg: string | null;
   publicada_em: string | null;
   lead_id: string | null;
+  /** barra verde na fila: o médico revisou ou mandou da busca (0021) */
+  revisada_em?: string | null;
 };
 
 export type Lead = {

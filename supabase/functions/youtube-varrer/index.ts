@@ -18,7 +18,7 @@
 // confere as três formas.
 import {
   admin, chamadaInterna, chamarFuncaoInterna, CORS, corpoJson, ehUuid, emSegundoPlano, enxerga, Falha, lerSegredo, quemPediu,
-  responder, respostaDeErro,
+  responder, respostaDeErro, VIOLACAO_UNICA,
 } from "../_shared/base.ts";
 import { type Avaliacao, carregarConfig, estimarPorcentagens, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
 import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, tokenDeAcesso, type ComentarioLido, videosDoCanal } from "../_shared/youtube.ts";
@@ -34,6 +34,9 @@ const PAGINAS_HISTORICO = 3;
 const CONVERSAS_POR_PASSO = 30;
 // catálogo de vídeos do canal (para a resposta sugerir um): relido 1x por dia
 const CATALOGO_VALE_MS = 24 * 3600_000;
+// elogio só ganha agradecimento se for recente: agradecer comentário de anos
+// atrás parece robô (o histórico do canal é lido para trás)
+const ELOGIO_RECENTE_MS = 30 * 86_400_000;
 
 function iguais(a: string, b: string): boolean {
   if (!a || a.length !== b.length) return false;
@@ -181,6 +184,15 @@ async function passoTriar(clienteId: string): Promise<string> {
   const avaliacoes = await triar(clienteId, lote, c);
   let leads = 0;
   let paraResponder = 0;
+  let agradecimentos = 0;
+  let descartados = 0;
+  /** regra 1 (0021): um evento de cada tipo por comentário no histórico do lead;
+   *  o repetido (o médico ligou pela busca ao mesmo tempo) é descartado e contado */
+  const noHistorico = async (evento: Record<string, unknown>) => {
+    const { error } = await admin.from("lead_eventos").insert(evento);
+    if (error?.code === VIOLACAO_UNICA) descartados++;
+    else if (error) throw new Falha(`Não consegui gravar o histórico do lead (${error.message}).`, 500);
+  };
   for (const x of lote) {
     const a: Avaliacao | undefined = avaliacoes.get(x.id);
     if (!a) {
@@ -188,8 +200,9 @@ async function passoTriar(clienteId: string): Promise<string> {
       continue;
     }
     let leadId: string | null = null;
-    // continuação de conversa de quem já é lead continua lead
-    const ehLead = (qualifica(a, c) || (!!x.conversa_de && !!x.lead_id)) && !!x.autor_canal_id;
+    // já ligado a um lead (continuação de conversa de quem é lead, ou o médico
+    // respondeu pela busca antes da triagem — 0021) continua lead
+    const ehLead = (qualifica(a, c) || !!x.lead_id) && !!x.autor_canal_id;
     if (ehLead) {
       const { data: id, error } = await admin.rpc("garantir_lead", {
         p_cliente: clienteId, p_autor: x.autor_canal_id, p_nome: x.autor_nome, p_foto: x.autor_foto_url, p_prob: a.probabilidade, p_procs: a.procedimentos,
@@ -197,13 +210,13 @@ async function passoTriar(clienteId: string): Promise<string> {
       if (error) throw new Falha(`Não consegui criar o lead (${error.message}).`, 500);
       leadId = id as string;
       leads++;
-      await admin.from("lead_eventos").insert({ cliente_id: clienteId, lead_id: leadId, tipo: "comentario", texto: x.texto.slice(0, 4000), comentario_id: x.id, feito_por: null });
+      await noHistorico({ cliente_id: clienteId, lead_id: leadId, tipo: "comentario", texto: x.texto.slice(0, 4000), comentario_id: x.id, feito_por: null });
       // o médico já respondeu no YouTube: o lead já está em conversa
       if (x.ja_respondido) await admin.from("leads").update({ etapa: "respondido" }).eq("id", leadId).eq("etapa", "novo");
       // respondeu pela busca antes da triagem (15/11/26): a resposta entra no
       // histórico do lead e o lead já está respondido
       if (x.resposta === "publicada") {
-        await admin.from("lead_eventos").insert({ cliente_id: clienteId, lead_id: leadId, tipo: "resposta", texto: String(x.rascunho ?? "").slice(0, 4000), comentario_id: x.id, feito_por: x.publicada_por });
+        await noHistorico({ cliente_id: clienteId, lead_id: leadId, tipo: "resposta", texto: String(x.rascunho ?? "").slice(0, 4000), comentario_id: x.id, feito_por: x.publicada_por });
         await admin.from("leads").update({ etapa: "respondido" }).eq("id", leadId).eq("etapa", "novo");
       }
       // a pessoa respondeu à resposta: a conversa andou
@@ -219,18 +232,30 @@ async function passoTriar(clienteId: string): Promise<string> {
         .eq("conversa_de", x.conversa_de).gt("publicado_em", x.publicado_em);
       responder = !maisNovas && (a.urgente || !["elogio", "spam", "critica", "outro"].includes(a.categoria));
     }
+    // elogio recente (David, 15/11/26: "os comentários que são varridos e são
+    // elogios ... botar uma mensagem mais simples de agradecimento e já botar a
+    // barrinha verde"): vai para a fila; a redação agradece em poucas frases e
+    // marca como revisada. Agradecer não é oferta: a pessoa não vira lead.
+    const agradecer = !responder && !ehLead && !x.conversa_de && a.categoria === "elogio" && !a.urgente && !x.ja_respondido
+      && x.pode_responder && x.resposta === "nenhuma" && Date.now() - new Date(x.publicado_em).getTime() < ELOGIO_RECENTE_MS;
     await admin.from("yt_comentarios").update({
       triagem: "feita", probabilidade: a.probabilidade, categoria: a.categoria, procedimentos: a.procedimentos, urgente: a.urgente,
-      resumo: a.resumo, triado_em: new Date().toISOString(), lead_id: leadId,
+      resumo: a.resumo, triado_em: new Date().toISOString(),
+      // não desliga o lead que o médico ligou pela busca enquanto a IA triava (regra 4)
+      ...(leadId ? { lead_id: leadId } : {}),
       consulta_pct: a.consulta, cirurgia_pct: a.cirurgia, socio_pct: a.socio, socio_motivo: a.socio_motivo, pct_em: new Date().toISOString(),
     }).eq("id", x.id);
     // só entra na fila se ninguém mexeu na resposta enquanto a IA triava
-    if (responder) {
+    if (responder || agradecer) {
       const { data: foi } = await admin.from("yt_comentarios").update({ resposta: "redigir" }).eq("id", x.id).eq("resposta", "nenhuma").select("id");
-      if (foi?.length) paraResponder++;
+      if (foi?.length) {
+        if (responder) paraResponder++;
+        else agradecimentos++;
+      }
     }
   }
-  return `${lote.length} comentário(s) triado(s): ${leads} lead(s), ${paraResponder} para responder.`;
+  if (descartados) console.warn(`youtube-varrer: ${descartados} registro(s) repetido(s) do histórico do lead descartado(s) na triagem`);
+  return `${lote.length} comentário(s) triado(s): ${leads} lead(s), ${paraResponder} para responder${agradecimentos ? `, ${agradecimentos} elogio(s) para agradecer` : ""}${descartados ? `; ${descartados} registro(s) repetido(s) no histórico descartado(s)` : ""}.`;
 }
 
 /** As três porcentagens (0019) dos comentários triados antes delas: primeiro
@@ -302,6 +327,14 @@ async function passoRedigir(clienteId: string): Promise<string> {
   if (!itens.length) return `${juntados} comentário(s) de quem já tem resposta: sem resposta nova.`;
   // só grava no que continua "redigir": o médico pode ter respondido pela busca enquanto a IA escrevia
   const r = await gravarRedacao(itens, await redigir(clienteId, itens, c), ["redigir"]);
+  // agradecimento de elogio (15/11/26): já fica com a barra verde, quase pronto
+  // para publicar; o que deu problema fica sem a barra, com o motivo
+  const elogios = itens.filter((i) => i.categoria === "elogio").map((i) => i.id);
+  if (elogios.length) {
+    const { error } = await admin.from("yt_comentarios").update({ revisada_em: new Date().toISOString() })
+      .in("id", elogios).eq("resposta", "rascunho").is("revisada_em", null);
+    if (error) throw new Falha(`Não consegui marcar os agradecimentos como prontos (${error.message}).`, 500);
+  }
   return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}${juntados ? `; ${juntados} de quem já tem resposta` : ""}${r.pulados ? `; ${r.pulados} você já tinha respondido pela busca` : ""}.`;
 }
 

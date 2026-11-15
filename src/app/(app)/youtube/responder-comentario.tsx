@@ -5,13 +5,18 @@
 // não colocar a resposta automática ainda"). Fechado, mostra só os botões; a
 // IA escreve quando o médico pede. Publicar é sempre clique dele, como na fila
 // (as políticas da API do YouTube exigem que quem publica tenha a palavra final).
+// Quem o médico responde vira lead, com código YT (David, 15/11/26: "Sim, virar
+// lead"); agradecimento de elogio não. "Enviar para revisar" (15/11/26: "já
+// cria uma resposta de [IA] pronta ... barrinha na lateral pintando de verde"):
+// a IA escreve e a resposta vai para a fila com a barra verde, sem abrir aqui.
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ExternalLink, GraduationCap, LoaderCircle, MessageSquareReply, Send, Sparkles } from "lucide-react";
+import { ExternalLink, GraduationCap, ListPlus, LoaderCircle, MessageSquareReply, Send, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
 import { CHAVE_SEM_CONFIRMAR, editouDeVerdade, foiAnonimizado, LINK_VIDEO } from "@/lib/youtube";
-import { ignorarResposta, salvarRascunho } from "./acoes";
+import { ignorarResposta, marcarRevisada, salvarRascunho } from "./acoes";
 import JanelaTreino from "./treino";
 
 /** O que a tela precisa do comentário para responder. */
@@ -31,9 +36,16 @@ export type ParaResponder = {
   resposta_msg?: string | null;
   video_sugerido?: string | null;
   publicada_em?: string | null;
+  lead_id?: string | null;
+  codigo?: string | null;
+  categoria?: string | null;
+  /** barra verde na fila (0021) */
+  revisada_em?: string | null;
 };
 
-type Aviso = { ok: boolean; texto: string } | null;
+/** `fila`: o aviso leva à resposta na fila */
+type Aviso = { ok: boolean; texto: string; fila?: boolean } | null;
+type Escrito = { mensagem: string; texto: string; problema: string | null; video_sugerido: string | null; codigo: string | null; revisada: boolean };
 const NA_FILA = ["rascunho", "falhou"];
 
 export default function ResponderComentario({ c, canal, clienteId, videoIndicado }: {
@@ -55,6 +67,7 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
   const [aviso, setAviso] = useState<Aviso>(null);
   const [treinando, setTreinando] = useState(false);
   const [semConfirmar, setSemConfirmar] = useState(false);
+  const [codigo, setCodigo] = useState<string | null>(c.codigo ?? null);
 
   useEffect(() => {
     try { setSemConfirmar(localStorage.getItem(CHAVE_SEM_CONFIRMAR) === "1"); } catch { /* sem armazenamento: pergunta sempre */ }
@@ -65,7 +78,12 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
     <a href={link} target="_blank" rel="noreferrer" className="botao-claro"><ExternalLink size={14} /> Ver no YouTube</a>
   );
 
-  const avisoNaTela = aviso && <p className={`rounded-lg px-3 py-2 text-sm ${aviso.ok ? "bg-teal-50 text-teal-900" : "bg-zinc-100 text-zinc-900"}`}>{aviso.texto}</p>;
+  const naFilaHref = `/youtube?aba=fila&f=revisada#c-${c.id}`;
+  const avisoNaTela = aviso && (
+    <p className={`rounded-lg px-3 py-2 text-sm ${aviso.ok ? "bg-teal-50 text-teal-900" : "bg-zinc-100 text-zinc-900"}`}>
+      {aviso.texto}{aviso.fila && <> <Link href={aviso.ok ? naFilaHref : "/youtube?aba=fila"} className="font-medium underline">Abrir na fila</Link></>}
+    </p>
+  );
 
   // o que impede de responder aparece com o motivo (regra 2)
   if (foiAnonimizado(c.texto)) return null;
@@ -97,6 +115,9 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
   }
 
   const naFila = NA_FILA.includes(c.resposta) && !!c.rascunho;
+  const revisada = c.resposta === "rascunho" && !!c.rascunho && !!c.revisada_em;
+  // agradecimento de elogio não faz ninguém virar lead (o servidor decide igual)
+  const elogio = !c.lead_id && c.categoria === "elogio";
   const parado = !!ocupado;
   // há texto do médico na tela (ou salvo) que a IA trocaria
   const temTextoDele = (!!texto.trim() && texto.trim() !== (daIa ?? "").trim()) || (!!c.rascunho_editado && !!c.rascunho && daIa === null);
@@ -115,7 +136,7 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
   async function escreverComIa(sobrescrever: boolean) {
     setOcupado("ia");
     setAviso(null);
-    const r = await chamarFuncao<{ mensagem: string; texto: string; problema: string | null; video_sugerido: string | null }>("youtube-responder", {
+    const r = await chamarFuncao<Escrito>("youtube-responder", {
       acao: "refazer", comentario_id: c.id, instrucao: instrucao.trim(), sobrescrever,
     });
     setOcupado(null);
@@ -123,6 +144,7 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
       setAviso({ ok: false, texto: r.erro });
       return;
     }
+    if (r.dados.codigo) setCodigo(r.dados.codigo);
     setTexto(r.dados.texto);
     setDaIa(r.dados.texto);
     setVideo(r.dados.video_sugerido);
@@ -133,6 +155,52 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
     setTrocar(false);
     setAviso({ ok: true, texto: "A IA escreveu a sugestão; revise antes de publicar. Ela também ficou em “Respostas para revisar”; nada foi publicado." });
     router.refresh();
+  }
+
+  /** "Enviar para revisar": resposta pronta na fila, com a barra verde, sem abrir aqui */
+  async function enviarParaRevisar() {
+    setAviso(null);
+    // já tem resposta pronta na fila: só ganha a barra verde (sem gastar IA)
+    if (c.resposta === "rascunho" && c.rascunho) {
+      setOcupado("enviar");
+      const m = await marcarRevisada(c.id, true);
+      setOcupado(null);
+      setAviso(m.ok ? { ok: true, texto: "Já estava em “Respostas para revisar”; agora com a barra verde.", fila: true } : { ok: false, texto: m.msg });
+      if (m.ok) router.refresh();
+      return;
+    }
+    setOcupado("enviar");
+    const r = await chamarFuncao<Escrito>("youtube-responder", { acao: "refazer", comentario_id: c.id, marcar: true });
+    setOcupado(null);
+    if (!r.ok) {
+      setAviso({ ok: false, texto: r.erro });
+      return;
+    }
+    if (r.dados.codigo) setCodigo(r.dados.codigo);
+    setAberto(false);
+    setAviso(r.dados.revisada
+      ? { ok: true, texto: `A IA escreveu a resposta e ela foi para “Respostas para revisar”, com a barra verde. Nada foi publicado.${!c.lead_id && r.dados.codigo ? ` A pessoa virou lead (${r.dados.codigo}).` : ""}`, fila: true }
+      : { ok: false, texto: `A IA escreveu, mas há um problema: ${r.dados.problema ?? "veja na fila"}. A resposta está na fila sem a barra verde, para você corrigir.`, fila: true });
+    router.refresh();
+  }
+
+  /** "Pôr o código no texto": a pessoa vira lead já e o código entra no fim da resposta */
+  async function porCodigo() {
+    let cod = codigo;
+    if (!cod) {
+      setOcupado("codigo");
+      const r = await chamarFuncao<{ mensagem: string; codigo: string }>("youtube-responder", { acao: "lead", comentario_id: c.id });
+      setOcupado(null);
+      if (!r.ok) {
+        setAviso({ ok: false, texto: r.erro });
+        return;
+      }
+      cod = r.dados.codigo;
+      setCodigo(cod);
+      setAviso({ ok: true, texto: r.dados.mensagem });
+      router.refresh();
+    }
+    setTexto((t) => `${t.trim()} (informe o código ${cod})`.trim());
   }
 
   async function responderComIa() {
@@ -202,6 +270,12 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
 
   return (
     <div className="space-y-2 pt-1">
+      {!aberto && revisada && (
+        <p className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-semibold text-emerald-800">Na fila de “Respostas para revisar”, com a barra verde.</span>
+          <Link href={naFilaHref} className="underline">Abrir na fila</Link>
+        </p>
+      )}
       {!aberto && (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="botao-claro" disabled={parado} onClick={() => abrir(c.rascunho_editado ? c.rascunho ?? "" : "", null)}>
@@ -210,12 +284,18 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
           <button type="button" className="botao-claro" disabled={parado} onClick={responderComIa}>
             {ocupado === "ia" ? carregando("A IA está escrevendo…") : <><Sparkles size={14} /> Responder com IA</>}
           </button>
+          {!revisada && c.resposta !== "falhou" && (
+            <button type="button" className="botao-claro" disabled={parado} onClick={enviarParaRevisar}
+              title="A IA escreve a resposta e ela vai para “Respostas para revisar” com a barra verde, pronta para publicar no lote">
+              {ocupado === "enviar" ? carregando(c.resposta === "rascunho" ? "Marcando…" : "A IA está escrevendo…") : <><ListPlus size={14} /> Enviar para revisar</>}
+            </button>
+          )}
           {naFila && (
             <button type="button" className="botao-claro" disabled={parado} onClick={ignorar}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
           )}
           <button type="button" className="botao-claro" disabled={parado} onClick={() => setTreinando(true)}><GraduationCap size={14} /> Treinamento da IA</button>
           {verNoYoutube}
-          {naFila && <span className="text-xs text-zinc-500">já tem resposta na fila</span>}
+          {naFila && !revisada && <span className="text-xs text-zinc-500">{c.resposta === "falhou" ? "na fila, com um problema para corrigir" : "já tem resposta na fila"}</span>}
         </div>
       )}
 
@@ -228,6 +308,17 @@ export default function ResponderComentario({ c, canal, clienteId, videoIndicado
           <textarea id={`resp-${c.id}`} className="campo bg-white leading-relaxed" rows={4} value={texto} disabled={parado} autoFocus
             placeholder="Escreva a resposta que vai sair no YouTube em seu nome." onChange={(e) => setTexto(e.target.value)} />
           <div className="text-xs text-zinc-400">{texto.length} caracteres</div>
+          <p className="text-xs text-zinc-600">
+            {codigo
+              ? <>Lead <b>{codigo}</b>: se indicar WhatsApp ou telefone, peça para a pessoa dizer este código.</>
+              : elogio ? "Agradecimento de elogio: a pessoa não vira lead."
+                : "Esta pessoa ainda não é lead: vira lead (com código) quando você publicar ou pedir à IA."}
+            {!elogio && !(codigo && texto.toUpperCase().includes(codigo.toUpperCase())) && (
+              <button type="button" className="ml-2 font-medium underline" disabled={parado} onClick={porCodigo}>
+                {ocupado === "codigo" ? "Criando o lead…" : "Pôr o código no texto"}
+              </button>
+            )}
+          </p>
           {video && (
             <p className="text-xs text-zinc-600">
               A IA indicou o vídeo do canal{" "}

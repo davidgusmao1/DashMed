@@ -3,14 +3,18 @@
 // Fila de respostas do YouTube Seller: a IA triou e escreveu; o médico lê,
 // ajusta e publica (as políticas da API do YouTube exigem que quem publica
 // tenha a palavra final — e a resposta sai no nome dele).
+// Barra verde (David, 15/11/26: "toda a resposta que eu revisar ... barrinha
+// verde ... na hora de publicar, selecionar e mandar publicar tudo junto"): a
+// resposta revisada (editada e salva, marcada, ou mandada pronta da busca) fica
+// com a barra; "Selecionar as revisadas" junta todas para o lote.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, GraduationCap, ListChecks, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, GraduationCap, ListChecks, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
 import { CHAVE_SEM_CONFIRMAR, type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
-import { ignorarResposta, salvarRascunho } from "./acoes";
+import { ignorarResposta, marcarRevisada, salvarRascunho } from "./acoes";
 import Porcentagens from "./porcentagens";
 import JanelaTreino from "./treino";
 
@@ -38,6 +42,10 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
   const [treinando, setTreinando] = useState(false);
+  const [salvandoSozinho, setSalvandoSozinho] = useState(false);
+  // clicou em publicar: o salvar automático ao sair do campo não atrapalha
+  const publicando = useRef(false);
+  const cartao = useRef<HTMLLIElement>(null);
 
   // o lote publica o texto que está na tela, editado ou não
   useEffect(() => { aoMudarTexto(texto); }, [texto, aoMudarTexto]);
@@ -55,6 +63,7 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
   }
 
   async function publicar() {
+    publicando.current = true;
     setOcupado("publicar");
     setAviso(null);
     const r = await chamarFuncao<{ mensagem: string }>("youtube-responder", { acao: "publicar", comentario_id: c.id, texto });
@@ -79,12 +88,27 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
     router.refresh();
   }
 
-  async function guardar() {
-    setOcupado("salvar");
+  /** salvar o texto ajustado já marca como revisada (barra verde). O
+   *  automático (saiu do cartão) não trava os botões: um clique que veio junto
+   *  não se perde. */
+  async function guardar(automatico = false) {
+    if (automatico && (publicando.current || ocupado)) return;
+    if (automatico) setSalvandoSozinho(true); else setOcupado("salvar");
     const r = await salvarRascunho(c.id, texto);
-    setOcupado(null);
+    if (automatico) setSalvandoSozinho(false); else setOcupado(null);
+    if (!r.ok && automatico && publicando.current) return;
     setAviso(r.ok ? null : { ok: false, texto: r.msg });
     if (r.ok) { setEditado(false); router.refresh(); }
+  }
+
+  async function alternarRevisada() {
+    // ajustou e não salvou: salvar já marca
+    if (editado) return guardar();
+    setOcupado("marcar");
+    const r = await marcarRevisada(c.id, !c.revisada_em);
+    setOcupado(null);
+    setAviso(r.ok ? null : { ok: false, texto: r.msg });
+    if (r.ok) router.refresh();
   }
 
   async function ignorar() {
@@ -97,8 +121,9 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
 
   const jaEditado = c.rascunho_editado || editado;
   const parado = !!ocupado || travado;
+  const revisada = !!c.revisada_em && c.resposta === "rascunho";
   return (
-    <li className={`cartao space-y-3 p-4 ${selecionado ? "ring-2 ring-teal-600" : ""}`}>
+    <li ref={cartao} id={`c-${c.id}`} className={`cartao scroll-mt-4 space-y-3 p-4 ${revisada ? "border-l-4 border-l-emerald-500" : ""} ${selecionado ? "ring-2 ring-teal-600" : ""}`}>
       <div className="flex items-start gap-3">
         {c.autor_foto_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -114,6 +139,7 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
             {c.conversa_de && <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white">continuação da conversa</span>}
             {c.procedimentos.map((p) => <span key={p} className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700">{p}</span>)}
             {codigo && c.lead_id && <Link href={`/youtube/leads/${c.lead_id}`} className="text-xs text-zinc-500 underline">lead {codigo}</Link>}
+            {revisada && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700"><CheckCircle2 size={12} /> revisada</span>}
             <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-zinc-600">
               <input type="checkbox" className="size-4 accent-teal-700" checked={selecionado} disabled={travado} onChange={(e) => aoSelecionar(e.target.checked)} />
               Selecionar
@@ -140,9 +166,15 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
 
       <div>
         <label className="rotulo" htmlFor={`r-${c.id}`}>Resposta {jaEditado ? "(editada por você)" : "sugerida pela IA"}</label>
+        {/* ajustou e saiu do cartão: salva sozinho e ganha a barra verde. Indo
+            para um botão do próprio cartão (Publicar, Refazer...), o botão decide. */}
         <textarea id={`r-${c.id}`} className="campo leading-relaxed" rows={5} value={texto} disabled={parado}
-          onChange={(e) => { setTexto(e.target.value); setEditado(true); }} />
-        <div className="text-xs text-zinc-400">{texto.length} caracteres</div>
+          onChange={(e) => { setTexto(e.target.value); setEditado(true); }}
+          onBlur={(e) => {
+            if (cartao.current?.contains(e.relatedTarget as Node | null)) return;
+            if (editado && texto.trim().length >= 2 && texto.trim() !== (c.rascunho ?? "").trim()) guardar(true);
+          }} />
+        <div className="text-xs text-zinc-400">{texto.length} caracteres{salvandoSozinho ? " · salvando e marcando como revisada…" : ""}</div>
         {c.video_sugerido && (
           <p className="mt-1 text-xs text-zinc-600">
             A IA indicou o vídeo do canal{" "}
@@ -188,7 +220,13 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
           <button className="botao" onClick={() => (semConfirmar ? publicar() : setModo("confirmar"))} disabled={parado || texto.trim().length < 2}>
             {ocupado === "publicar" ? <><LoaderCircle size={14} className="animate-spin" /> Publicando…</> : <><Send size={14} /> Publicar</>}
           </button>
-          {editado && <button className="botao-claro" onClick={guardar} disabled={parado}>{ocupado === "salvar" ? "Salvando…" : "Salvar rascunho"}</button>}
+          <button className={revisada ? "botao-claro border-emerald-500 text-emerald-800" : "botao-claro"} onClick={alternarRevisada}
+            disabled={parado || (c.resposta !== "rascunho" && !editado)}
+            title={c.resposta !== "rascunho" && !editado ? "Corrija o problema no texto; ao salvar, ela fica revisada." : revisada ? "Tirar a barra verde" : "Põe a barra verde: pronta para publicar no lote"}>
+            {ocupado === "salvar" || ocupado === "marcar" ? <LoaderCircle size={14} className="animate-spin" />
+              : revisada ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Circle size={14} />}
+            {editado ? "Salvar e marcar revisada" : revisada ? "Revisada" : "Marcar como revisada"}
+          </button>
           <button className="botao-claro" onClick={() => setModo("refazer")} disabled={parado}><Sparkles size={14} /> Refazer com a IA</button>
           <button className="botao-claro" onClick={ignorar} disabled={parado}>{ocupado === "ignorar" ? "…" : "Ignorar"}</button>
           <button className="botao-claro" onClick={() => setTreinando(true)} disabled={parado}><GraduationCap size={14} /> Treinamento da IA</button>
@@ -236,6 +274,8 @@ export default function Fila({ comentarios, codigos, canal, clienteId, conversas
   });
   const quaisCabem = comentarios.slice(0, MAXIMO_LOTE).map((c) => c.id);
   const todosMarcados = quaisCabem.length > 0 && quaisCabem.every((id) => marcados.has(id));
+  const revisadas = comentarios.filter((c) => c.revisada_em && c.resposta === "rascunho").map((c) => c.id);
+  const revisadasQueCabem = revisadas.slice(0, MAXIMO_LOTE);
 
   async function publicarLote() {
     setConfirmandoLote(false);
@@ -269,6 +309,12 @@ export default function Fila({ comentarios, codigos, canal, clienteId, conversas
             onChange={(e) => setMarcados(e.target.checked ? new Set(quaisCabem) : new Set())} />
           Selecionar {comentarios.length > MAXIMO_LOTE ? `as ${MAXIMO_LOTE} primeiras` : "todas"}
         </label>
+        {revisadas.length > 0 && (
+          <button type="button" className="botao-claro py-1" disabled={andando} onClick={() => setMarcados(new Set(revisadasQueCabem))}>
+            <span aria-hidden className="inline-block h-3.5 w-1 rounded-full bg-emerald-500" />
+            Selecionar as revisadas ({revisadas.length > MAXIMO_LOTE ? `${MAXIMO_LOTE} de ${revisadas.length}` : revisadas.length})
+          </button>
+        )}
         <label className="flex cursor-pointer items-center gap-1.5">
           <input type="checkbox" className="size-4 accent-teal-700" checked={semConfirmar} onChange={(e) => mudarSemConfirmar(e.target.checked)} />
           Publicar sem pedir confirmação

@@ -401,5 +401,66 @@ insert into resultado select 'auditoria prova quem anonimizou e quando', count(*
 -- a auditoria (LGPD) registrou o lead e a mudança de etapa
 insert into resultado select 'auditoria registrou o lead', count(*) >= 2, count(*)::text
   from auditoria where tabela = 'leads' and registro_id = (select id from ids where nome = 'a');
+
+-- ── 4. quem o médico responde vira lead; barra verde (0021) ──
+insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, autor_canal_id, texto, publicado_em,
+                            triagem, probabilidade, categoria, resposta, rascunho, publicada_em) values
+  ('00000000-0000-4000-8000-0000000000e7', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'th7', 'cm7', 'v1', 'Ana', 'UCana',
+   'Doutor, dói o joelho ao subir escada.', now(), 'feita', 15, 'sintoma', 'publicada', 'Oi, Ana! Vale avaliar.', now()),
+  ('00000000-0000-4000-8000-0000000000e8', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'th8', 'cm8', 'v1', 'Ana', 'UCana',
+   'E o quadril?', now(), 'pendente', null, null, 'nenhuma', null, null),
+  ('00000000-0000-4000-8000-0000000000e9', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'th9', 'cm9', 'v1', 'Anonimizado', null,
+   '[comentário anonimizado a pedido]', now(), 'feita', 0, 'outro', 'nenhuma', null, null),
+  ('00000000-0000-4000-8000-0000000000ea', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'tha', 'cma', 'v1', 'Bia', 'UCbia',
+   'Que vídeo ótimo!', now(), 'feita', 2, 'elogio', 'publicada', 'Obrigado, Bia!', now() - interval '20 minutes'),
+  ('00000000-0000-4000-8000-0000000000eb', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'thb', 'cmb', 'v1', 'Carla', 'UCcarla',
+   'Faz infiltração?', now(), 'feita', 30, 'tratamento', 'publicada', 'Oi, Carla!', now() - interval '20 minutes'),
+  ('00000000-0000-4000-8000-0000000000ec', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'thc', 'cmc', 'v1', 'Dora', 'UCdora',
+   'Atende em São Paulo?', now(), 'feita', 60, 'agendamento', 'rascunho', 'Oi, Dora!', null);
+create temp table lig (nome text, r jsonb) on commit drop;
+insert into lig select 'ana', ligar_lead_ao_comentario('00000000-0000-4000-8000-0000000000e7');
+insert into lig select 'ana2', ligar_lead_ao_comentario('00000000-0000-4000-8000-0000000000e7');
+insert into lig select 'ana3', ligar_lead_ao_comentario('00000000-0000-4000-8000-0000000000e8');
+insert into lig select 'anon', ligar_lead_ao_comentario('00000000-0000-4000-8000-0000000000e9');
+insert into resultado select 'respondido vira lead com código', r->>'lead_id' is not null and r->>'codigo' like 'YT%' and (r->>'descartados')::int = 0, r::text
+  from lig where nome = 'ana';
+insert into resultado select 'comentário fica ligado ao lead', lead_id::text = (select r->>'lead_id' from lig where nome = 'ana'), coalesce(lead_id::text, 'sem lead')
+  from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e7';
+insert into resultado select 'comentário e resposta entram no histórico, uma vez', count(*) filter (where tipo = 'comentario') = 1 and count(*) filter (where tipo = 'resposta') = 1,
+  count(*)::text from lead_eventos where comentario_id = '00000000-0000-4000-8000-0000000000e7';
+insert into resultado select 'lead respondido vai para "respondido"', etapa = 'respondido', etapa from leads where id = (select (r->>'lead_id')::uuid from lig where nome = 'ana');
+insert into resultado select 'ligar de novo não repete o histórico (descarte contado)', (r->>'lead_id') = (select r->>'lead_id' from lig where nome = 'ana') and (r->>'descartados')::int = 2, r::text
+  from lig where nome = 'ana2';
+insert into resultado select 'outro comentário da mesma pessoa = mesmo lead', (r->>'lead_id') = (select r->>'lead_id' from lig where nome = 'ana'), r::text from lig where nome = 'ana3';
+insert into resultado select 'comentário anonimizado não vira lead (com motivo)', r->>'lead_id' is null and r->>'motivo' is not null, r::text from lig where nome = 'anon';
+do $$ begin
+  insert into lead_eventos (cliente_id, lead_id, tipo, texto, comentario_id)
+  select '00000000-0000-4000-8000-0000000000c2', (r->>'lead_id')::uuid, 'comentario', 'de novo', '00000000-0000-4000-8000-0000000000e7' from lig where nome = 'ana';
+  insert into resultado values ('histórico recusa o mesmo comentário duas vezes', false, 'entrou');
+exception when unique_violation then insert into resultado values ('histórico recusa o mesmo comentário duas vezes', true, '');
+end $$;
+select vigiar();
+insert into resultado select 'vigia liga ao lead o respondido sem lead', lead_id is not null, coalesce(lead_id::text, 'sem lead')
+  from yt_comentarios where id = '00000000-0000-4000-8000-0000000000eb';
+insert into resultado select 'vigia registra o conserto', count(*) = 1, count(*)::text from achados
+  where regra = 'youtube_respondido_sem_lead' and alvo_id = '00000000-0000-4000-8000-0000000000eb' and consertado;
+insert into resultado select 'agradecimento de elogio não vira lead', lead_id is null, coalesce(lead_id::text, 'sem lead')
+  from yt_comentarios where id = '00000000-0000-4000-8000-0000000000ea';
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":":plataforma","role":"authenticated"}';
+do $$ declare n int; begin
+  update yt_comentarios set revisada_em = now() where id = '00000000-0000-4000-8000-0000000000ec';
+  get diagnostics n = row_count;
+  insert into resultado values ('plataforma marca a resposta como revisada', n = 1, n::text);
+exception when others then insert into resultado values ('plataforma marca a resposta como revisada', false, sqlerrm);
+end $$;
+do $$ begin
+  perform ligar_lead_ao_comentario('00000000-0000-4000-8000-0000000000ec');
+  insert into resultado values ('sessão não liga lead pela função do robô', false, 'ligou');
+exception when insufficient_privilege then insert into resultado values ('sessão não liga lead pela função do robô', true, sqlerrm);
+end $$;
+reset role;
+
 select teste, ok, left(detalhe, 70) as detalhe from resultado order by ok, teste;
 rollback;

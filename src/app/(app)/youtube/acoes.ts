@@ -17,7 +17,7 @@ function falha(error: { message: string } | null, linhas: unknown[] | null): Res
 /** O médico não quer responder este comentário (pode voltar atrás). */
 export async function ignorarResposta(id: string): Promise<Resultado> {
   const supabase = await supabaseServidor();
-  const { data, error } = await supabase.from("yt_comentarios").update({ resposta: "ignorada" })
+  const { data, error } = await supabase.from("yt_comentarios").update({ resposta: "ignorada", revisada_em: null })
     .eq("id", id).in("resposta", ["rascunho", "falhou"]).select("id");
   const f = falha(error, data);
   if (f) return f;
@@ -37,18 +37,32 @@ export async function voltarParaFila(id: string): Promise<Resultado> {
 
 /** Texto editado pelo médico: a IA não troca sem ele confirmar (regra 4).
  *  Da busca (15/11/26) o comentário pode estar fora da fila: salvar põe na
- *  fila. Publicado ou sendo publicado não muda; anonimizado (LGPD) também não. */
+ *  fila. Publicado ou sendo publicado não muda; anonimizado (LGPD) também não.
+ *  O que o médico escreveu ou ajustou está revisado: ganha a barra verde (0021). */
 export async function salvarRascunho(id: string, texto: string): Promise<Resultado> {
   const t = texto.trim();
   if (t.length < 2) return { ok: false, msg: "A resposta está vazia." };
   if (t.length > 2000) return { ok: false, msg: "Resposta longa demais (até 2.000 caracteres)." };
   const supabase = await supabaseServidor();
-  const { data, error } = await supabase.from("yt_comentarios").update({ rascunho: t, rascunho_editado: true, resposta: "rascunho" })
+  const { data, error } = await supabase.from("yt_comentarios").update({ rascunho: t, rascunho_editado: true, resposta: "rascunho", revisada_em: new Date().toISOString() })
     .eq("id", id).in("resposta", ["nenhuma", "redigir", "rascunho", "falhou", "ignorada"])
     .eq("pode_responder", true).not("texto", "like", "[comentário anonimizado%").select("id");
   const f = falha(error, data);
   if (f) return f;
   return { ok: true, msg: "Rascunho salvo." };
+}
+
+/** Barra verde na fila (David, 15/11/26: "toda a resposta que eu revisar ...
+ *  barrinha verde ... na hora de publicar, selecionar e mandar publicar tudo
+ *  junto"). Só resposta pronta na fila; a com problema precisa ser corrigida e
+ *  salva antes (salvar já marca). */
+export async function marcarRevisada(id: string, sim: boolean): Promise<Resultado> {
+  const supabase = await supabaseServidor();
+  const { data, error } = await supabase.from("yt_comentarios").update({ revisada_em: sim ? new Date().toISOString() : null })
+    .eq("id", id).eq("resposta", "rascunho").select("id");
+  const f = falha(error, data);
+  if (f) return f.msg.startsWith("Não encontrado") ? { ok: false, msg: "Só a resposta pronta na fila pode ser marcada (a com problema: corrija e salve)." } : f;
+  return { ok: true, msg: sim ? "Marcada como revisada." : "Marca tirada." };
 }
 
 export async function moverLead(id: string, etapa: string): Promise<Resultado> {

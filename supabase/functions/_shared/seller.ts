@@ -349,7 +349,8 @@ export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redi
       // sugestao_ia guarda o que a IA escreveu, para comparar com o que o
       // médico publicar (aprender com as edições, 0012)
       rascunho: r.texto, sugestao_ia: r.texto, rascunho_editado: false, resposta: r.problema ? "falhou" : "rascunho", resposta_msg: r.problema,
-      video_sugerido: r.video_id,
+      // texto novo da IA: ainda não foi revisado (sai a barra verde, 0021)
+      video_sugerido: r.video_id, revisada_em: null,
     }).eq("id", it.id).in("resposta", estados).select("id");
     if (error) throw new Falha(`Não consegui gravar a resposta sugerida (${error.message}).`, 500);
     if (!data?.length) pulados++;
