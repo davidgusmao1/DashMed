@@ -67,6 +67,11 @@ export type Comentario = {
   sugestao_ia: string | null;
   /** vídeo do canal que a IA indicou na resposta (0017) */
   video_sugerido?: string | null;
+  /** as três porcentagens da 0019 (null até a varredura calcular; socio null = texto sem base) */
+  consulta_pct?: number | null;
+  cirurgia_pct?: number | null;
+  socio_pct?: number | null;
+  socio_motivo?: string | null;
   resposta_msg: string | null;
   publicada_em: string | null;
   lead_id: string | null;

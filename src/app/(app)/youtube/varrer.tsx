@@ -14,6 +14,7 @@ const PASSO: Record<string, string> = {
   ler_historico: "lendo comentários antigos",
   triar: "a IA está triando os comentários",
   redigir: "a IA está escrevendo as respostas",
+  estimar: "a IA está calculando as porcentagens dos comentários já triados",
 };
 
 export default function Varrer({ clienteId, v, podeVarrer }: { clienteId: string; v: Varredura | null; podeVarrer: boolean }) {

@@ -8,6 +8,7 @@ import BuscarLead from "./buscar-lead";
 import Fila from "./fila";
 import FiltrosFila, { type ContagemFila, type FiltroFila } from "./filtros-fila";
 import Pautas, { type Pauta } from "./pautas";
+import Porcentagens from "./porcentagens";
 import Quadro, { type CartaoLead } from "./quadro";
 import Resultados, { type Funil } from "./resultados";
 import Varrer from "./varrer";
@@ -75,7 +76,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       video: video && vids.has(video) ? video : "",
     };
     let q = supabase.from("yt_comentarios")
-      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido", { count: "exact" })
+      .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido, consulta_pct, cirurgia_pct, socio_pct, socio_motivo", { count: "exact" })
       .eq("cliente_id", emFoco.id).in("resposta", ["rascunho", "falhou"]).is("deleted_at", null);
     if (filtro.f === "urgente") q = q.eq("urgente", true);
     if (filtro.f === "conversa") q = q.not("conversa_de", "is", null);
@@ -145,7 +146,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       : <Resultados funil={data as Funil} />;
   } else {
     const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id")
+      .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, consulta_pct, cirurgia_pct, socio_pct, socio_motivo")
       .eq("cliente_id", emFoco.id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(100);
     conteudo = (
       <div className="cartao divide-y divide-zinc-100">
@@ -157,7 +158,8 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
               <span>{dataHora(c.publicado_em)}</span>
               {c.triagem === "feita" ? (
                 <>
-                  <span className="rounded bg-teal-50 px-1 font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
+                  <span title="Chance de marcar consulta ou procedimento (decide quem vira lead)" className="rounded bg-teal-50 px-1 font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
+                  <Porcentagens c={c} />
                   <span>{ROTULO_CATEGORIA[c.categoria ?? ""] ?? c.categoria}</span>
                 </>
               ) : <span>{c.triagem === "erro" ? "triagem falhou" : "aguardando triagem"}</span>}

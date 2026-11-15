@@ -11,6 +11,7 @@ import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
 import { type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
 import { ignorarResposta, salvarRascunho } from "./acoes";
+import Porcentagens from "./porcentagens";
 import JanelaTreino from "./treino";
 
 type Conversa = { comentario: string; resposta: string | null };
@@ -110,7 +111,8 @@ function Cartao({ c, codigo, canal, clienteId, conversa, videoIndicado, semConfi
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             <b>{c.autor_nome}</b>
             {c.urgente && <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white"><Siren size={12} /> urgente</span>}
-            <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
+            <span title="Chance de marcar consulta ou procedimento (decide quem vira lead)" className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-semibold text-teal-800">{c.probabilidade ?? 0}%</span>
+            <Porcentagens c={c} />
             {c.categoria && <span className="text-xs text-zinc-500">{ROTULO_CATEGORIA[c.categoria] ?? c.categoria}</span>}
             {c.conversa_de && <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-xs font-semibold text-white">continuação da conversa</span>}
             {c.procedimentos.map((p) => <span key={p} className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700">{p}</span>)}

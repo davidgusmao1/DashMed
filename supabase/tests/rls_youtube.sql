@@ -28,9 +28,11 @@ insert into resultado select 'lead guarda a maior probabilidade e soma procedime
   from leads where id = (select id from ids where nome = 'a');
 insert into resultado select 'códigos diferentes por lead', count(distinct codigo) = 2, string_agg(codigo, ',') from leads where cliente_id = '00000000-0000-4000-8000-0000000000c2';
 
-insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, autor_canal_id, texto, publicado_em, triagem, probabilidade, resposta, rascunho, lead_id)
+insert into yt_comentarios (id, cliente_id, canal_id, thread_id, comentario_id, video_id, autor_nome, autor_canal_id, texto, publicado_em, triagem, probabilidade, resposta, rascunho, lead_id,
+                            consulta_pct, cirurgia_pct, socio_pct, socio_motivo, pct_em)
   select '00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000c2', 'UCteste', 'th1', 'cm1', 'v1', 'Maria', 'UCpessoa',
-         'Doutor, quanto custa a prótese?', now(), 'feita', 80, 'rascunho', 'Oi, Maria!', id from ids where nome = 'a';
+         'Doutor, quanto custa a prótese?', now(), 'feita', 80, 'rascunho', 'Oi, Maria!', id,
+         85, 70, 60, 'escrita formal; tem convênio', now() from ids where nome = 'a';
 insert into lead_eventos (cliente_id, lead_id, tipo, texto) select '00000000-0000-4000-8000-0000000000c2', id, 'comentario', 'comentou' from ids where nome = 'a';
 
 -- uma resposta publicada que o médico editou (aprender com as edições, 0012)
@@ -147,6 +149,12 @@ do $$ begin
   update yt_comentarios set probabilidade = 100 where id = '00000000-0000-4000-8000-0000000000e1';
   insert into resultado values ('sessão não muda a triagem', false, 'mudou');
 exception when insufficient_privilege then insert into resultado values ('sessão não muda a triagem', true, sqlerrm);
+end $$;
+-- as porcentagens (0019) são do robô, como a probabilidade
+do $$ begin
+  update yt_comentarios set socio_pct = 100 where id = '00000000-0000-4000-8000-0000000000e1';
+  insert into resultado values ('sessão não muda as porcentagens', false, 'mudou');
+exception when insufficient_privilege then insert into resultado values ('sessão não muda as porcentagens', true, sqlerrm);
 end $$;
 do $$ begin
   update leads set codigo = 'YT0000' where cliente_id = '00000000-0000-4000-8000-0000000000c2';
@@ -276,6 +284,11 @@ insert into resultado select 'anonimizar apaga o que identifica o lead',
   nome || ' ' || etapa from leads where id = (select id from ids where nome = 'a');
 insert into resultado select 'comentário anonimizado e resposta cancelada',
   texto like '[comentário anonimizado%' and autor_nome = 'Anonimizado' and autor_canal_id is null and resposta = 'ignorada' and rascunho = '[anonimizado]', resposta
+  from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
+-- 0019: a estimativa socioeconômica é perfil da pessoa e sai; consulta e cirurgia ficam para o funil
+insert into resultado select 'anonimizar apaga a estimativa socioeconômica',
+  socio_pct is null and socio_motivo is null and pct_em is not null and consulta_pct = 85 and cirurgia_pct = 70,
+  coalesce(socio_pct::text, 'null') || ' ' || coalesce(socio_motivo, 'null')
   from yt_comentarios where id = '00000000-0000-4000-8000-0000000000e1';
 insert into resultado select 'histórico do lead sem texto pessoal',
   bool_and(texto in ('[anonimizado]', 'Dados pessoais anonimizados a pedido da pessoa (LGPD).') or tipo = 'etapa'), string_agg(texto, ' | ')

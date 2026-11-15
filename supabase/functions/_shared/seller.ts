@@ -53,7 +53,7 @@ export async function carregarTreinos(clienteId: string): Promise<string> {
 
 function blocoTreino(treinos: string, para: "triagem" | "resposta"): string {
   if (!treinos) return "";
-  return `\n\nTREINAMENTO DO MÉDICO (orientações que ele deu para ${para === "resposta" ? "as respostas" : "a triagem"}; siga sempre, sem quebrar as regras do CFM nem inventar telefone ou endereço; se duas orientações se contradizem, vale a mais recente; ${para === "triagem" ? "use só as que falam de quem é lead, de probabilidade, de procedimento ou de urgência" : "use as que falam de tom, conteúdo, oferta e formato"}):\n${treinos}`;
+  return `\n\nTREINAMENTO DO MÉDICO (orientações que ele deu para ${para === "resposta" ? "as respostas" : "a triagem"}; siga sempre, sem quebrar as regras do CFM nem inventar telefone ou endereço; se duas orientações se contradizem, vale a mais recente; ${para === "triagem" ? "use só as que falam de quem é lead, de probabilidade, das porcentagens, de procedimento ou de urgência" : "use as que falam de tom, conteúdo, oferta e formato"}):\n${treinos}`;
 }
 
 /** Os textos de onde a resposta pode tirar telefone e endereço. */
@@ -65,7 +65,53 @@ export const CATEGORIAS = ["agendamento", "preco", "tratamento", "sintoma", "pos
 
 // ── triagem ─────────────────────────────────────────────────────────────
 export type ParaTriar = { id: string; texto: string; autor_nome: string; video_titulo: string | null };
-export type Avaliacao = { probabilidade: number; categoria: string; procedimentos: string[]; urgente: boolean; resumo: string };
+/** As três porcentagens da 0019 (David, 15/11/26). socio null = o texto não dá base para estimar. */
+export type Porcentagens = { consulta: number; cirurgia: number; socio: number | null; socio_motivo: string | null };
+export type Avaliacao = { probabilidade: number; categoria: string; procedimentos: string[]; urgente: boolean; resumo: string } & Porcentagens;
+
+/** Critérios das três porcentagens, iguais na triagem e no cálculo dos já
+ *  triados (passo "estimar"). A socioeconômica é só para quem revisa: nunca
+ *  entra no pedido da resposta, que é a mesma para todos (o Código de Ética
+ *  Médica veda discriminar). */
+function criteriosPorcentagens(c: Config): string {
+  return `- consulta, de 0 a 100: chance de a pessoa marcar uma CONSULTA com este médico (telemedicina ou presencial):
+  80 a 100: pergunta como marcar, onde ele atende, se atende por telemedicina, quanto custa a consulta, ou pede para ser avaliada;
+  50 a 79: descreve o próprio problema (ou de um familiar) e quer saber o que fazer;
+  20 a 49: dúvida geral sobre o assunto, sem dizer que é para si;
+  0 a 19: elogio, agradecimento, conversa, spam, ou já se trata com outro médico e não pede avaliação;
+- cirurgia, de 0 a 100: chance de a pessoa vir a fazer uma CIRURGIA com este médico (entre os procedimentos ${c.procedimentos.join("; ")}, os que são cirurgia). Não é indicação médica: é o que o texto sugere.
+  70 a 100: diz que já tem indicação de cirurgia ou que quer operar, ou pergunta sobre a cirurgia (como é, recuperação, quando fazer) para si ou para um familiar;
+  40 a 69: descreve um quadro que costuma chegar à cirurgia (artrose avançada, "osso com osso", vários tratamentos sem melhora, dor que já impede de andar ou dormir);
+  10 a 39: problema que costuma se tratar sem cirurgia, ou procura justamente evitar a cirurgia;
+  0 a 9: não fala de um problema seu, ou já operou e só comenta;
+- socioeconomico, de 0 a 100: estimativa do nível socioeconômico de quem escreve, pela maneira como escreve e pelo que conta: vocabulário, ortografia, pontuação e organização do texto; plano de saúde ou convênio; pagar particular; depender do SUS ou dizer que não tem condições de pagar; profissão; viagens; morar fora do país.
+  0 a 19 muito baixo; 20 a 39 baixo; 40 a 59 médio; 60 a 79 médio-alto; 80 a 100 alto.
+  Erro de digitação de celular (letra trocada, falta de acento) não conta; conta o vocabulário e a construção do texto. Nunca use nome, apelido, cidade ou região, sotaque, religião, idade ou gênero presumidos.
+  Se o texto for curto demais ou não der sinal nenhum (ex.: "obrigado doutor"), devolva -1;
+- socio_motivo: até 10 palavras com os sinais que você usou (ex.: "escrita formal; tem convênio"; "diz que aguarda na fila do SUS"); vazio quando socioeconomico for -1.`;
+}
+
+const PROPRIEDADES_PCT = {
+  consulta: { type: "integer" },
+  cirurgia: { type: "integer" },
+  socioeconomico: { type: "integer" },
+  socio_motivo: { type: "string" },
+} as const;
+const CAMPOS_PCT = ["consulta", "cirurgia", "socioeconomico", "socio_motivo"];
+type PctDaIa = { consulta?: unknown; cirurgia?: unknown; socioeconomico?: unknown; socio_motivo?: unknown };
+
+const pct = (n: unknown) => Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
+
+function lerPorcentagens(a: PctDaIa): Porcentagens {
+  const s = Math.round(Number(a.socioeconomico));
+  const semBase = !Number.isFinite(s) || s < 0;
+  return {
+    consulta: pct(a.consulta),
+    cirurgia: pct(a.cirurgia),
+    socio: semBase ? null : Math.min(100, s),
+    socio_motivo: semBase ? null : String(a.socio_motivo ?? "").trim().slice(0, 120) || null,
+  };
+}
 
 function sistemaTriagem(c: Config, especialidade: string, treinos: string): string {
   return `Você faz a triagem dos comentários do canal do YouTube de um médico brasileiro (${especialidade || "especialidade não informada"}).
@@ -80,7 +126,8 @@ Para CADA comentário (identificado por c1, c2, ...), devolva:
 - categoria: uma de ${CATEGORIAS.join(", ")};
 - procedimentos: os da lista que o comentário menciona ou sugere, escritos exatamente como na lista (vazio se nenhum);
 - urgente: true se o texto sugere algo que precisa de atendimento imediato (febre, vermelhidão ou secreção na ferida depois de cirurgia; dor súbita e muito forte; não consegue apoiar o pé depois de queda; perna inchada e dolorida ou falta de ar depois de cirurgia);
-- resumo: até 20 palavras, em português, do que a pessoa quer.
+- resumo: até 20 palavras, em português, do que a pessoa quer;
+${criteriosPorcentagens(c)}
 Avalie só pelo texto; não invente. Comentário em outra língua: avalie igual.${blocoTreino(treinos, "triagem")}`;
 }
 
@@ -101,8 +148,9 @@ export async function triar(clienteId: string, itens: ParaTriar[], c: Config): P
             procedimentos: { type: "array", items: c.procedimentos.length ? { type: "string", enum: c.procedimentos } : { type: "string" } },
             urgente: { type: "boolean" },
             resumo: { type: "string" },
+            ...PROPRIEDADES_PCT,
           },
-          required: ["id", "probabilidade", "categoria", "procedimentos", "urgente", "resumo"],
+          required: ["id", "probabilidade", "categoria", "procedimentos", "urgente", "resumo", ...CAMPOS_PCT],
           additionalProperties: false,
         },
       },
@@ -111,7 +159,7 @@ export async function triar(clienteId: string, itens: ParaTriar[], c: Config): P
     additionalProperties: false,
   };
   const pedido = itens.map((x, i) => `c${i + 1} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}\n${x.texto.slice(0, 1500)}`).join("\n\n");
-  const r = await pedirJson<{ avaliacoes: (Avaliacao & { id: string })[] }>(claude, {
+  const r = await pedirJson<{ avaliacoes: (Omit<Avaliacao, keyof Porcentagens> & PctDaIa & { id: string })[] }>(claude, {
     sistema: sistemaTriagem(c, perfil?.especialidade ?? "", treinos), pedido: `COMENTÁRIOS:\n\n${pedido}`, esquema, esforco: "low", maxTokens: 16000, timeoutMs: 95_000,
   });
   const mapa = new Map<string, Avaliacao>();
@@ -125,7 +173,46 @@ export async function triar(clienteId: string, itens: ParaTriar[], c: Config): P
       procedimentos: (a.procedimentos ?? []).filter((p) => c.procedimentos.includes(p)),
       urgente: !!a.urgente,
       resumo: String(a.resumo ?? "").slice(0, 300),
+      ...lerPorcentagens(a),
     });
+  }
+  return mapa;
+}
+
+/** As três porcentagens para comentários triados antes da 0019 (passo
+ *  "estimar" da varredura). Não muda a triagem: probabilidade, lead e fila
+ *  ficam como estão. Sem o nome de quem escreveu: não entra na estimativa. */
+export async function estimarPorcentagens(clienteId: string, itens: ParaTriar[], c: Config): Promise<Map<string, Porcentagens>> {
+  const [perfil, treinos] = await Promise.all([carregarPerfil(clienteId), carregarTreinos(clienteId)]);
+  const claude = await claudeDoCliente(clienteId, 100_000);
+  const esquema = {
+    type: "object",
+    properties: {
+      avaliacoes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { id: { type: "string" }, ...PROPRIEDADES_PCT },
+          required: ["id", ...CAMPOS_PCT],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["avaliacoes"],
+    additionalProperties: false,
+  };
+  const sistema = `Você avalia comentários do canal do YouTube de um médico brasileiro (${perfil?.especialidade || "especialidade não informada"}).
+Para CADA comentário (identificado por c1, c2, ...), devolva:
+${criteriosPorcentagens(c)}
+Avalie só pelo texto; não invente. Comentário em outra língua: avalie igual.${blocoTreino(treinos, "triagem")}`;
+  const pedido = itens.map((x, i) => `c${i + 1} | vídeo: ${x.video_titulo ?? "?"}\n${x.texto.slice(0, 1500)}`).join("\n\n");
+  const r = await pedirJson<{ avaliacoes: (PctDaIa & { id: string })[] }>(claude, {
+    sistema, pedido: `COMENTÁRIOS:\n\n${pedido}`, esquema, esforco: "low", maxTokens: 12000, timeoutMs: 95_000,
+  });
+  const mapa = new Map<string, Porcentagens>();
+  for (const a of r.avaliacoes ?? []) {
+    const item = itens[Number(String(a.id).replace(/\D/g, "")) - 1];
+    if (item) mapa.set(item.id, lerPorcentagens(a));
   }
   return mapa;
 }

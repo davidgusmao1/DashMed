@@ -2,12 +2,14 @@
 // começando pelos comentários mais recentes aos mais antigos").
 //
 // Um passo por execução (o relógio da edge é curto), encadeados:
-//   ler_novos → [videos, 1x/dia] → conversas → triar (lotes de 40) → redigir (lotes de 6) → ler_historico → ...
+//   ler_novos → [videos, 1x/dia] → conversas → triar (lotes de 40) → redigir (lotes de 6) → [estimar] → ler_historico → ...
 // - ler_novos: do topo até o comentário mais novo já lido;
 // - ler_historico: a próxima página para trás, guardada em historico_token;
 // - triar: a IA dá probabilidade, procedimento, urgência; quem qualifica vira
 //   lead (um por pessoa) e entra na fila de resposta;
-// - redigir: a IA escreve a resposta; fica como rascunho para o médico publicar.
+// - redigir: a IA escreve a resposta; fica como rascunho para o médico publicar;
+// - estimar: as porcentagens de consulta, cirurgia e socioeconômica (0019) dos
+//   comentários triados antes delas; acaba quando todos têm (pct_em).
 // Teto de passos por rodada (custo de IA previsível); a rodada seguinte (cron
 // de hora em hora ou botão) continua de onde parou. Travou? O vigia marca erro.
 //
@@ -18,13 +20,14 @@ import {
   admin, chamadaInterna, chamarFuncaoInterna, CORS, corpoJson, ehUuid, emSegundoPlano, enxerga, Falha, lerSegredo, quemPediu,
   responder, respostaDeErro,
 } from "../_shared/base.ts";
-import { type Avaliacao, carregarConfig, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
+import { type Avaliacao, carregarConfig, estimarPorcentagens, gravarRedacao, paraRedigir, qualifica, redigir, triar } from "../_shared/seller.ts";
 import { canalConectado, gastarCota, lerPagina, mensagensDaConversa, titulosDosVideos, tokenDeAcesso, type ComentarioLido, videosDoCanal } from "../_shared/youtube.ts";
 import { mensagensDepoisDoCanal } from "../_shared/texto.ts";
 
 const MAX_PASSOS = 16;
 const LOTE_TRIAGEM = 40;
 const LOTE_REDACAO = 6;
+const LOTE_PORCENTAGENS = 50;
 const PAGINAS_NOVOS = 5;
 const PAGINAS_HISTORICO = 3;
 const CONVERSAS_POR_PASSO = 30;
@@ -54,6 +57,12 @@ async function contar(clienteId: string, campo: "triagem" | "resposta", valor: s
   const { count } = await admin.from("yt_comentarios").select("id", { count: "exact", head: true })
     .eq("cliente_id", clienteId).eq(campo, valor).is("deleted_at", null);
   return count ?? 0;
+}
+
+/** Comentários triados antes da 0019, ainda sem as três porcentagens. */
+function semPorcentagens(clienteId: string, campos: string, cabeca = false) {
+  return admin.from("yt_comentarios").select(campos, cabeca ? { count: "exact", head: true } : undefined)
+    .eq("cliente_id", clienteId).eq("triagem", "feita").is("pct_em", null).is("deleted_at", null);
 }
 
 /** sha256 de "cliente:canal", igual a hash_autor_youtube() da 0018. */
@@ -245,9 +254,43 @@ async function passoTriar(clienteId: string): Promise<string> {
     await admin.from("yt_comentarios").update({
       triagem: "feita", probabilidade: a.probabilidade, categoria: a.categoria, procedimentos: a.procedimentos, urgente: a.urgente,
       resumo: a.resumo, triado_em: new Date().toISOString(), lead_id: leadId, resposta: responder ? "redigir" : "nenhuma",
+      consulta_pct: a.consulta, cirurgia_pct: a.cirurgia, socio_pct: a.socio, socio_motivo: a.socio_motivo, pct_em: new Date().toISOString(),
     }).eq("id", x.id);
   }
   return `${lote.length} comentário(s) triado(s): ${leads} lead(s), ${paraResponder} para responder.`;
+}
+
+/** As três porcentagens (0019) dos comentários triados antes delas: primeiro
+ *  os de leads (a fila inteira está aqui), depois o resto, do mais novo ao
+ *  mais antigo. Só grava as porcentagens; triagem, lead e fila não mudam. */
+async function passoEstimar(clienteId: string): Promise<string> {
+  const c = await carregarConfig(clienteId);
+  const campos = "id, texto, autor_nome, video_titulo";
+  type Linha = { id: string; texto: string; autor_nome: string; video_titulo: string | null };
+  const { data: deLeads, error: e1 } = await semPorcentagens(clienteId, campos).not("lead_id", "is", null)
+    .order("publicado_em", { ascending: false }).limit(LOTE_PORCENTAGENS);
+  if (e1) throw new Falha(`Não consegui ler os comentários sem porcentagem (${e1.message}).`, 500);
+  let lote = (deLeads ?? []) as unknown as Linha[];
+  if (lote.length < LOTE_PORCENTAGENS) {
+    const { data: outros, error: e2 } = await semPorcentagens(clienteId, campos).is("lead_id", null)
+      .order("publicado_em", { ascending: false }).limit(LOTE_PORCENTAGENS - lote.length);
+    if (e2) throw new Falha(`Não consegui ler os comentários sem porcentagem (${e2.message}).`, 500);
+    lote = [...lote, ...((outros ?? []) as unknown as Linha[])];
+  }
+  if (!lote.length) return "Nada para calcular.";
+  const mapa = await estimarPorcentagens(clienteId, lote, c);
+  const agora = new Date().toISOString();
+  let semAvaliacao = 0;
+  for (const x of lote) {
+    const p = mapa.get(x.id);
+    // a IA pulou: marca assim mesmo (senão o passo repetiria para sempre) e conta na mensagem
+    if (!p) semAvaliacao++;
+    const { error } = await admin.from("yt_comentarios").update(p
+      ? { consulta_pct: p.consulta, cirurgia_pct: p.cirurgia, socio_pct: p.socio, socio_motivo: p.socio_motivo, pct_em: agora }
+      : { pct_em: agora }).eq("id", x.id).is("pct_em", null);
+    if (error) throw new Falha(`Não consegui gravar as porcentagens (${error.message}).`, 500);
+  }
+  return `Porcentagens calculadas para ${lote.length - semAvaliacao} comentário(s) já triado(s)${semAvaliacao ? `; a IA não avaliou ${semAvaliacao}, que ficam sem porcentagem` : ""}.`;
 }
 
 /** Uma resposta pendente por pessoa (David, 12/11/26: "vamos ajustar" — na
@@ -336,12 +379,14 @@ async function passo(clienteId: string): Promise<void> {
         : await lerHistorico(v, canal.canal_id, token);
     } else if (atual === "triar") {
       msg = await passoTriar(clienteId);
+    } else if (atual === "estimar") {
+      msg = await passoEstimar(clienteId);
     } else {
       msg = await passoRedigir(clienteId);
     }
     const passos = v.passos + 1;
-    // o que fazer a seguir: primeiro esvaziar a triagem, depois a redação, e
-    // então avançar no histórico
+    // o que fazer a seguir: primeiro esvaziar a triagem, depois a redação, as
+    // porcentagens dos já triados (0019), e então avançar no histórico
     const { data: depois } = await admin.from("yt_varreduras").select("historico_token, historico_completo").eq("cliente_id", clienteId).single();
     let proximo: string | null = null;
     const catalogoVelho = !v.videos_em || Date.now() - Date.parse(v.videos_em) > CATALOGO_VALE_MS;
@@ -349,6 +394,7 @@ async function passo(clienteId: string): Promise<void> {
     else if (atual === "videos") proximo = "conversas";
     else if (await contar(clienteId, "triagem", "pendente")) proximo = "triar";
     else if (await contar(clienteId, "resposta", "redigir")) proximo = "redigir";
+    else if ((await semPorcentagens(clienteId, "id", true)).count) proximo = "estimar";
     else if (!depois?.historico_completo && depois?.historico_token) proximo = "ler_historico";
 
     if (!proximo || passos >= MAX_PASSOS) {
