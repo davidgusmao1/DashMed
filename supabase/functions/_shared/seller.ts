@@ -260,7 +260,7 @@ Cada resposta:
 - tem de 2 a 5 frases e no máximo ${LIMITE_RESPOSTA - 100} caracteres; sem hashtags, sem links, no máximo um emoji;
 - se o comentário sugerir urgência, a PRIMEIRA frase orienta procurar atendimento de urgência agora;
 - convida para uma avaliação oferecendo SÓ as opções configuradas abaixo, com telefone, cidade e endereço exatamente como estão escritos (nunca invente telefone, endereço, preço, prazo ou convênio); ofereça as que fazem sentido para a pessoa, não precisa listar todas;
-- sempre que mandar a pessoa para um telefone ou WhatsApp, peça na mesma frase para ela dizer o código do comentário (ex.: "chame no WhatsApp (51) 0000-0000 e diga que veio do YouTube, código YT1234"); é assim que a equipe sabe de que comentário veio;
+- sempre que mandar a pessoa para um telefone ou WhatsApp, peça na mesma frase para ela dizer o código do comentário (ex.: "chame no WhatsApp (51) 0000-0000 e diga que veio do YouTube, código YT1234"); é assim que a equipe sabe de que comentário veio; item SEM CÓDIGO: nunca escreva código nenhum (nem o do exemplo);
 - quando sugerir a estimativa de custo de um tratamento, use o telefone de estimativa;
 - elogio ou agradecimento sem pergunta: agradeça em uma ou duas frases, sem oferta;
 - cada resposta é escrita para aquele comentário: não repita a mesma abertura nem o mesmo fechamento entre as respostas do lote;
@@ -299,7 +299,9 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
     additionalProperties: false,
   };
   const pedido = itens.map((x, i) => [
-    `c${i + 1} | código ${x.codigo} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}`,
+    // sem lead não há código (resposta pedida na busca, 15/11/26): sem isso a
+    // IA copiava o código do exemplo do prompt
+    `c${i + 1} | ${x.codigo ? `código ${x.codigo}` : "SEM CÓDIGO (não peça código; se indicar telefone ou WhatsApp, peça para dizer que veio do YouTube)"} | vídeo: ${x.video_titulo ?? "?"} | autor: ${x.autor_nome}`,
     `triagem: ${x.categoria ?? "?"}${x.urgente ? " | URGENTE" : ""}${x.procedimentos.length ? ` | ${x.procedimentos.join(", ")}` : ""}${x.resumo ? ` | ${x.resumo}` : ""}`,
     x.conversa ? `CONVERSA ATÉ AQUI:\n${x.conversa}\nNOVA MENSAGEM (responda a esta): ${x.texto.slice(0, 2000)}` : `comentário: ${x.texto.slice(0, 2000)}`,
     x.videos.length ? `VÍDEOS DO CANAL: ${x.videos.map((v, j) => `${j + 1}) "${v.titulo}"`).join(" | ")}` : null,
@@ -322,29 +324,39 @@ export async function redigir(clienteId: string, itens: ParaRedigir[], c: Config
   return mapa;
 }
 
+/** Os estados em que um comentário ainda pode ganhar resposta (o que não foi
+ *  publicado nem está sendo). Da busca, o médico responde qualquer um deles
+ *  (David, 15/11/26: "responder embaixo dos comentários buscados"). */
+export const ESTADOS_RESPONDIVEIS = ["nenhuma", "redigir", "rascunho", "falhou", "ignorada"];
+
 /** Grava o que a IA escreveu: sem problema vira rascunho; com problema fica
- *  "falhou" com o motivo e o texto, para o médico corrigir ou refazer. */
-export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redigido>): Promise<{ ok: number; problemas: number }> {
+ *  "falhou" com o motivo e o texto, para o médico corrigir ou refazer.
+ *  Só grava se o comentário ainda está num dos `estados`: se o médico
+ *  publicou ou mexeu enquanto a IA escrevia, o robô não passa por cima (regra 4). */
+export async function gravarRedacao(itens: ParaRedigir[], mapa: Map<string, Redigido>, estados = ESTADOS_RESPONDIVEIS): Promise<{ ok: number; problemas: number; pulados: number }> {
   let ok = 0;
   let problemas = 0;
+  let pulados = 0;
   for (const it of itens) {
     const r = mapa.get(it.id);
     if (!r) {
       problemas++;
-      await admin.from("yt_comentarios").update({ resposta: "falhou", resposta_msg: "A IA não escreveu esta resposta. Clique em \"Refazer\"." }).eq("id", it.id);
+      await admin.from("yt_comentarios").update({ resposta: "falhou", resposta_msg: "A IA não escreveu esta resposta. Clique em \"Refazer\"." })
+        .eq("id", it.id).in("resposta", estados);
       continue;
     }
-    if (r.problema) problemas++;
-    else ok++;
-    const { error } = await admin.from("yt_comentarios").update({
+    const { data, error } = await admin.from("yt_comentarios").update({
       // sugestao_ia guarda o que a IA escreveu, para comparar com o que o
       // médico publicar (aprender com as edições, 0012)
       rascunho: r.texto, sugestao_ia: r.texto, rascunho_editado: false, resposta: r.problema ? "falhou" : "rascunho", resposta_msg: r.problema,
       video_sugerido: r.video_id,
-    }).eq("id", it.id);
+    }).eq("id", it.id).in("resposta", estados).select("id");
     if (error) throw new Falha(`Não consegui gravar a resposta sugerida (${error.message}).`, 500);
+    if (!data?.length) pulados++;
+    else if (r.problema) problemas++;
+    else ok++;
   }
-  return { ok, problemas };
+  return { ok, problemas, pulados };
 }
 
 /** Os comentários a redigir, com o código do lead de cada um. */

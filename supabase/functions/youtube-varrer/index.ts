@@ -173,7 +173,7 @@ async function lerConversas(clienteId: string, canalId: string, token: string): 
 async function passoTriar(clienteId: string): Promise<string> {
   const c = await carregarConfig(clienteId);
   const { data } = await admin.from("yt_comentarios")
-    .select("id, texto, autor_nome, autor_canal_id, autor_foto_url, video_titulo, ja_respondido, pode_responder, conversa_de, lead_id, publicado_em")
+    .select("id, texto, autor_nome, autor_canal_id, autor_foto_url, video_titulo, ja_respondido, pode_responder, conversa_de, lead_id, publicado_em, resposta, rascunho, publicada_por")
     .eq("cliente_id", clienteId).eq("triagem", "pendente").is("deleted_at", null)
     .order("publicado_em", { ascending: false }).limit(LOTE_TRIAGEM);
   const lote = data ?? [];
@@ -200,10 +200,18 @@ async function passoTriar(clienteId: string): Promise<string> {
       await admin.from("lead_eventos").insert({ cliente_id: clienteId, lead_id: leadId, tipo: "comentario", texto: x.texto.slice(0, 4000), comentario_id: x.id, feito_por: null });
       // o médico já respondeu no YouTube: o lead já está em conversa
       if (x.ja_respondido) await admin.from("leads").update({ etapa: "respondido" }).eq("id", leadId).eq("etapa", "novo");
+      // respondeu pela busca antes da triagem (15/11/26): a resposta entra no
+      // histórico do lead e o lead já está respondido
+      if (x.resposta === "publicada") {
+        await admin.from("lead_eventos").insert({ cliente_id: clienteId, lead_id: leadId, tipo: "resposta", texto: String(x.rascunho ?? "").slice(0, 4000), comentario_id: x.id, feito_por: x.publicada_por });
+        await admin.from("leads").update({ etapa: "respondido" }).eq("id", leadId).eq("etapa", "novo");
+      }
       // a pessoa respondeu à resposta: a conversa andou
       if (x.conversa_de) await admin.from("leads").update({ etapa: "conversando" }).eq("id", leadId).in("etapa", ["novo", "respondido"]);
     }
-    let responder = ehLead && !x.ja_respondido && x.pode_responder;
+    // o médico já mexeu na resposta pela busca (escreveu, pediu à IA,
+    // publicou ou ignorou): a triagem não troca (regra 4)
+    let responder = ehLead && !x.ja_respondido && x.pode_responder && x.resposta === "nenhuma";
     if (responder && x.conversa_de) {
       // na conversa, só a mensagem mais nova ganha resposta, e só se pede algo
       // (não para "obrigada", elogio ou spam)
@@ -211,12 +219,16 @@ async function passoTriar(clienteId: string): Promise<string> {
         .eq("conversa_de", x.conversa_de).gt("publicado_em", x.publicado_em);
       responder = !maisNovas && (a.urgente || !["elogio", "spam", "critica", "outro"].includes(a.categoria));
     }
-    if (responder) paraResponder++;
     await admin.from("yt_comentarios").update({
       triagem: "feita", probabilidade: a.probabilidade, categoria: a.categoria, procedimentos: a.procedimentos, urgente: a.urgente,
-      resumo: a.resumo, triado_em: new Date().toISOString(), lead_id: leadId, resposta: responder ? "redigir" : "nenhuma",
+      resumo: a.resumo, triado_em: new Date().toISOString(), lead_id: leadId,
       consulta_pct: a.consulta, cirurgia_pct: a.cirurgia, socio_pct: a.socio, socio_motivo: a.socio_motivo, pct_em: new Date().toISOString(),
     }).eq("id", x.id);
+    // só entra na fila se ninguém mexeu na resposta enquanto a IA triava
+    if (responder) {
+      const { data: foi } = await admin.from("yt_comentarios").update({ resposta: "redigir" }).eq("id", x.id).eq("resposta", "nenhuma").select("id");
+      if (foi?.length) paraResponder++;
+    }
   }
   return `${lote.length} comentário(s) triado(s): ${leads} lead(s), ${paraResponder} para responder.`;
 }
@@ -281,15 +293,16 @@ async function passoRedigir(clienteId: string): Promise<string> {
       juntados++;
       await admin.from("yt_comentarios").update({
         resposta: "nenhuma", resposta_msg: "Mesma pessoa de outro comentário que já tem resposta (na fila ou publicada há menos de 7 dias): uma resposta por vez.",
-      }).eq("id", it.id);
+      }).eq("id", it.id).eq("resposta", "redigir");
       continue;
     }
     if (it.lead_id) pessoasDoLote.add(it.lead_id);
     itens.push(it);
   }
   if (!itens.length) return `${juntados} comentário(s) de quem já tem resposta: sem resposta nova.`;
-  const r = await gravarRedacao(itens, await redigir(clienteId, itens, c));
-  return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}${juntados ? `; ${juntados} de quem já tem resposta` : ""}.`;
+  // só grava no que continua "redigir": o médico pode ter respondido pela busca enquanto a IA escrevia
+  const r = await gravarRedacao(itens, await redigir(clienteId, itens, c), ["redigir"]);
+  return `${r.ok} resposta(s) pronta(s) para revisar${r.problemas ? `, ${r.problemas} com problema (ver na fila)` : ""}${juntados ? `; ${juntados} de quem já tem resposta` : ""}${r.pulados ? `; ${r.pulados} você já tinha respondido pela busca` : ""}.`;
 }
 
 /** Relê os vídeos públicos do canal: novos entram, os que saíram são

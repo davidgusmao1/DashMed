@@ -4,6 +4,8 @@
 // na URL e o servidor filtra a fila inteira, não só as 40 da tela.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ORDENS_FILA, type OrdemFila } from "@/lib/youtube";
+import Ordenar from "./ordenar";
 
 export type ContagemFila = {
   total: number;
@@ -12,13 +14,14 @@ export type ContagemFila = {
   procedimentos: [string, number][];
   videos: { id: string; titulo: string; n: number }[];
 };
-export type FiltroFila = { f: "" | "urgente" | "conversa"; proc: string; video: string };
+export type FiltroFila = { f: "" | "urgente" | "conversa"; proc: string; video: string; ordem: OrdemFila };
 
 function url(filtro: FiltroFila) {
   const p = new URLSearchParams({ aba: "fila" });
   if (filtro.f) p.set("f", filtro.f);
   if (filtro.proc) p.set("proc", filtro.proc);
   if (filtro.video) p.set("video", filtro.video);
+  if (filtro.ordem) p.set("ordem", filtro.ordem);
   return `/youtube?${p}`;
 }
 
@@ -49,7 +52,10 @@ export default function FiltrosFila({ contagem, filtro }: { contagem: ContagemFi
         <option value="">Todos os vídeos</option>
         {contagem.videos.map((v) => <option key={v.id} value={v.id}>{v.titulo.length > 60 ? `${v.titulo.slice(0, 58)}…` : v.titulo} ({v.n})</option>)}
       </select>
-      {algum && <Link href="/youtube?aba=fila" className="text-xs text-zinc-500 underline">limpar filtros</Link>}
+      {algum && <Link href={url({ f: "", proc: "", video: "", ordem: filtro.ordem })} className="text-xs text-zinc-500 underline">limpar filtros</Link>}
+      <span className="ml-auto">
+        <Ordenar id="ordem-fila" valor={filtro.ordem} opcoes={ORDENS_FILA.map((o) => ({ id: o.id, rotulo: o.rotulo, href: url({ ...filtro, ordem: o.id }) }))} />
+      </span>
     </div>
   );
 }

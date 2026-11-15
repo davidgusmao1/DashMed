@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { clientesDe, supabaseServidor, usuarioAtual } from "@/lib/supabase/server";
 import { lerFiltroDaUrl, lerResumoYoutube, POR_PAGINA, usaPorcentagens } from "@/lib/busca-youtube";
-import { type Comentario, LINK_VIDEO, type Resumo, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
+import { type Comentario, LINK_VIDEO, ORDENS_FILA, type Resumo, ROTULO_ETAPA, type Varredura } from "@/lib/youtube";
 import AprenderEdicoes from "./aprender";
 import Atualizador from "./atualizador";
 import BarraBusca from "./busca";
@@ -28,14 +28,25 @@ const ABAS = [
   { id: "busca", rotulo: "Busca" },
 ] as const;
 
-type Parametros = { aba?: string; f?: string; proc?: string; video?: string; q?: string; b?: string; o?: string; p?: string; yt?: string };
+// o que os botões de responder (responder-comentario.tsx) precisam além do que a lista mostra
+const CAMPOS_RESPONDER = "thread_id, pode_responder, rascunho, rascunho_editado, sugestao_ia, resposta_msg, video_sugerido, publicada_em";
+
+/** O título do vídeo do canal que a IA indicou em cada resposta (0017). */
+async function titulosIndicados(supabase: Awaited<ReturnType<typeof supabaseServidor>>, clienteId: string, itens: { video_sugerido?: string | null }[]) {
+  const ids = [...new Set(itens.map((i) => i.video_sugerido).filter(Boolean))] as string[];
+  if (!ids.length) return {};
+  const { data } = await supabase.from("yt_videos").select("video_id, titulo").eq("cliente_id", clienteId).in("video_id", ids);
+  return Object.fromEntries((data ?? []).map((v) => [v.video_id, v.titulo as string])) as Record<string, string>;
+}
+
+type Parametros = { aba?: string; f?: string; proc?: string; video?: string; ordem?: string; q?: string; b?: string; o?: string; p?: string; yt?: string };
 
 export default async function YoutubeSeller({ searchParams }: { searchParams: Promise<Parametros> }) {
   const eu = await usuarioAtual();
   if (!eu) return null;
   const { emFoco } = await clientesDe(eu);
   if (!emFoco) return <p className="text-sm text-zinc-500">Nenhum cliente cadastrado.</p>;
-  const { aba: abaPedida, f, proc, video, q: frase, b, o: obs, p: paginaPedida, yt } = await searchParams;
+  const { aba: abaPedida, f, proc, video, ordem, q: frase, b, o: obs, p: paginaPedida, yt } = await searchParams;
   const aba = ABAS.some((a) => a.id === abaPedida) ? abaPedida! : "fila";
   const supabase = await supabaseServidor();
 
@@ -74,6 +85,7 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
       f: f === "urgente" || f === "conversa" ? f : "",
       proc: proc && procs.has(proc) ? proc : "",
       video: video && vids.has(video) ? video : "",
+      ordem: ORDENS_FILA.find((o) => o.id === ordem)?.id ?? "",
     };
     let q = supabase.from("yt_comentarios")
       .select("id, comentario_id, thread_id, conversa_de, video_id, video_titulo, autor_nome, autor_foto_url, texto, publicado_em, curtidas, ja_respondido, triagem, probabilidade, categoria, procedimentos, urgente, resumo, resposta, rascunho, rascunho_editado, sugestao_ia, resposta_msg, publicada_em, lead_id, video_sugerido, consulta_pct, cirurgia_pct, socio_pct, socio_motivo", { count: "exact" })
@@ -83,8 +95,12 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
     // literal de array com aspas: o nome do procedimento tem espaço e parênteses
     if (filtro.proc) q = q.filter("procedimentos", "cs", `{"${filtro.proc.replace(/["\\]/g, "\\$&")}"}`);
     if (filtro.video) q = q.eq("video_id", filtro.video);
-    const { data, count } = await q
-      .order("urgente", { ascending: false }).order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false }).limit(40);
+    // a ordem que o médico escolheu vale para a fila inteira, não só para as 40 da tela
+    const pct = { consulta: "consulta_pct", cirurgia: "cirurgia_pct", socio: "socio_pct" } as const;
+    if (filtro.ordem === "recentes" || filtro.ordem === "antigos") q = q.order("publicado_em", { ascending: filtro.ordem === "antigos" });
+    else if (filtro.ordem) q = q.order(pct[filtro.ordem], { ascending: false, nullsFirst: false }).order("publicado_em", { ascending: false });
+    else q = q.order("urgente", { ascending: false }).order("probabilidade", { ascending: false }).order("publicado_em", { ascending: false });
+    const { data, count } = await q.limit(40);
     const lista = (data ?? []) as Comentario[];
     const ids = [...new Set(lista.map((c) => c.lead_id).filter(Boolean))] as string[];
     const { data: leads } = ids.length ? await supabase.from("leads").select("id, codigo").in("id", ids) : { data: [] };
@@ -163,12 +179,18 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
         filtro.videos?.length
           ? supabase.from("yt_videos").select("video_id, titulo").eq("cliente_id", emFoco.id).in("video_id", filtro.videos)
           : Promise.resolve({ data: [] as { video_id: string; titulo: string }[] }),
-        usaPorcentagens(filtro)
+        usaPorcentagens(filtro) || ["consulta", "cirurgia", "socio"].includes(filtro.ordem ?? "")
           ? supabase.from("yt_comentarios").select("id", { count: "exact", head: true })
             .eq("cliente_id", emFoco.id).eq("triagem", "feita").is("pct_em", null).is("deleted_at", null)
           : Promise.resolve({ count: 0 }),
       ]);
       const res = (data ?? null) as { total: number; itens: ItemComentario[] } | null;
+      // para responder embaixo de cada comentário (15/11/26): o que a busca não traz
+      if (res?.itens.length) {
+        const { data: extras } = await supabase.from("yt_comentarios").select(`id, ${CAMPOS_RESPONDER}`).in("id", res.itens.map((i) => i.id));
+        const porId = new Map((extras ?? []).map((x) => [x.id as string, x]));
+        res.itens = res.itens.map((i) => ({ ...i, ...(porId.get(i.id) ?? {}) }));
+      }
       // nada achado num vídeo: diz se é porque o vídeo ainda não tem comentário lido (regra 2)
       let videoSemComentario = false;
       if (res && res.total === 0 && filtro.videos?.length) {
@@ -180,13 +202,16 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
         ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui buscar: {error?.message ?? "sem resposta do banco"}.</p>
         : <ResultadosBusca clienteId={emFoco.id} yt={lerResumoYoutube(yt)} q={frase ?? null} obs={obs ?? null} filtro={filtro} total={res.total} itens={res.itens} pagina={pagina}
             titulos={Object.fromEntries((vids ?? []).map((v) => [v.video_id, v.titulo as string]))} faltamPorcentagens={faltam.count ?? 0}
-            videoSemComentario={videoSemComentario} />;
+            videoSemComentario={videoSemComentario}
+            acoes={{ canal: canal?.canal_titulo ?? "seu canal", clienteId: emFoco.id, titulosVideos: await titulosIndicados(supabase, emFoco.id, res.itens) }} />;
     }
   } else {
     const { data } = await supabase.from("yt_comentarios")
-      .select("id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, conversa_de, consulta_pct, cirurgia_pct, socio_pct, socio_motivo")
+      .select(`id, comentario_id, video_id, video_titulo, autor_nome, texto, publicado_em, triagem, probabilidade, categoria, urgente, resposta, ja_respondido, lead_id, conversa_de, consulta_pct, cirurgia_pct, socio_pct, socio_motivo, ${CAMPOS_RESPONDER}`)
       .eq("cliente_id", emFoco.id).is("deleted_at", null).order("publicado_em", { ascending: false }).limit(100);
-    conteudo = <ListaComentarios itens={(data ?? []) as ItemComentario[]} vazio="Nenhum comentário lido ainda." />;
+    const itens = (data ?? []) as unknown as ItemComentario[];
+    conteudo = <ListaComentarios itens={itens} vazio="Nenhum comentário lido ainda."
+      acoes={{ canal: canal?.canal_titulo ?? "seu canal", clienteId: emFoco.id, titulosVideos: await titulosIndicados(supabase, emFoco.id, itens) }} />;
   }
 
   return (

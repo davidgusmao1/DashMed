@@ -1,18 +1,20 @@
 // Lista de comentários lidos: a aba "Comentários lidos" e o resultado da busca
-// (15/11/26). Na busca, as palavras achadas aparecem marcadas.
+// (15/11/26). Na busca, as palavras achadas aparecem marcadas. Com `acoes`,
+// cada comentário ganha os botões de responder (responder-comentario.tsx).
 // Sem "use client": roda no servidor.
 import Link from "next/link";
 import { dataHora } from "@/lib/conteudo";
 import { pedacosRealcados } from "@/lib/busca-youtube";
 import { LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
 import Porcentagens from "./porcentagens";
+import ResponderComentario, { type ParaResponder } from "./responder-comentario";
 
 const RESPOSTA: Record<string, string> = {
   nenhuma: "sem resposta", redigir: "IA vai escrever", rascunho: "na fila", publicando: "publicando…",
   publicada: "respondido", falhou: "na fila (problema)", ignorada: "ignorado",
 };
 
-export type ItemComentario = {
+export type ItemComentario = Partial<ParaResponder> & {
   id: string;
   comentario_id: string;
   video_id: string;
@@ -48,7 +50,10 @@ function Texto({ texto, realce }: { texto: string; realce: RegExp | null }) {
   );
 }
 
-export default function ListaComentarios({ itens, realce = null, vazio }: { itens: ItemComentario[]; realce?: RegExp | null; vazio: string }) {
+/** Para os botões de responder: o canal (para a confirmação) e o título dos vídeos que a IA indicou. */
+export type AcoesLista = { canal: string; clienteId: string; titulosVideos: Record<string, string> };
+
+export default function ListaComentarios({ itens, realce = null, vazio, acoes }: { itens: ItemComentario[]; realce?: RegExp | null; vazio: string; acoes?: AcoesLista }) {
   return (
     <div className="cartao divide-y divide-zinc-100">
       {itens.length === 0 && <p className="p-5 text-sm text-zinc-500">{vazio}</p>}
@@ -74,6 +79,10 @@ export default function ListaComentarios({ itens, realce = null, vazio }: { iten
           {/* a busca olha também o resumo da IA (pega comentário em outra língua): mostra quando foi ele que bateu */}
           {realce && c.resumo && !achou(c.texto, realce) && achou(c.resumo, realce) && (
             <p className="text-xs text-zinc-500">Resumo da IA: <Texto texto={c.resumo} realce={realce} /></p>
+          )}
+          {acoes && (
+            <ResponderComentario c={c as ParaResponder} canal={acoes.canal} clienteId={acoes.clienteId}
+              videoIndicado={c.video_sugerido ? acoes.titulosVideos[c.video_sugerido] ?? null : null} />
           )}
         </div>
       ))}

@@ -8,6 +8,8 @@
 //   - confere no YouTube se o canal já respondeu à mão (humano ganha — regra 4).
 //   Publicada a resposta, o lead vai para "respondido" e o histórico registra.
 // refazer: a IA escreve outra sugestão (com o pedido do médico, se houver).
+// Publicar e refazer valem também para o comentário achado na busca, mesmo
+//   fora da fila e sem lead (David, 15/11/26: "responder com IA" na busca).
 // aprender / pautas: a IA propõe (regras de treinamento, temas de vídeo); a
 //   equipe decide na tela o que fica.
 // buscar: a IA traduz a frase de busca em critérios; quem acha é o banco
@@ -16,7 +18,7 @@
 //   o que ainda não estava (só lê; não responde nada).
 import { administra, admin, CORS, corpoJson, ehUuid, enxerga, Falha, quemPediu, responder, respostaDeErro } from "../_shared/base.ts";
 import { buscarNoYoutube, interpretarBusca } from "../_shared/busca.ts";
-import { acharPautas, aprenderComEdicoes, carregarConfig, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
+import { acharPautas, aprenderComEdicoes, carregarConfig, ESTADOS_RESPONDIVEIS, gravarRedacao, paraRedigir, redigir } from "../_shared/seller.ts";
 import { canalConectado, canalJaRespondeu, gastarCota, publicarResposta, tokenDeAcesso } from "../_shared/youtube.ts";
 
 type Pedido = {
@@ -69,17 +71,27 @@ Deno.serve(async (req) => {
 
     if (!ehUuid(p.comentario_id)) throw new Falha("Comentário inválido.");
     const { data: c } = await admin.from("yt_comentarios")
-      .select("id, cliente_id, comentario_id, resposta, rascunho, rascunho_editado, lead_id, pode_responder, conversa_de, publicado_em")
+      .select("id, cliente_id, comentario_id, resposta, rascunho, rascunho_editado, lead_id, pode_responder, conversa_de, publicado_em, texto, autor_canal_id, ja_respondido")
       .eq("id", p.comentario_id).is("deleted_at", null).maybeSingle();
     if (!c || !enxerga(eu, c.cliente_id)) throw new Falha("Comentário não encontrado.", 404);
+
+    // da fila ou da busca (15/11/26): qualquer comentário ainda sem resposta
+    // publicada, menos o de quem pediu para sair (LGPD, marca da 0018)
+    const podeGanharResposta = () => {
+      if (c.resposta === "publicada") throw new Falha("Este comentário já foi respondido pela DashMed.", 409);
+      if (c.resposta === "publicando") throw new Falha("Esta resposta já está sendo publicada.", 409);
+      if (!ESTADOS_RESPONDIVEIS.includes(c.resposta)) throw new Falha("Este comentário não pode ser respondido agora.", 409);
+      if (!c.autor_canal_id && String(c.texto).startsWith("[comentário anonimizado")) {
+        throw new Falha("Esta pessoa pediu para apagar os dados (LGPD): o comentário não recebe resposta.", 409);
+      }
+      if (!c.pode_responder) throw new Falha("O YouTube não deixa responder este comentário.", 409);
+    };
 
     if (p.acao === "publicar") {
       const texto = String(p.texto ?? "").trim();
       if (texto.length < 2) throw new Falha("A resposta está vazia.");
       if (texto.length > 2000) throw new Falha("Resposta longa demais (até 2.000 caracteres).");
-      if (c.resposta === "publicada") throw new Falha("Este comentário já foi respondido pela DashMed.", 409);
-      if (!["rascunho", "falhou"].includes(c.resposta)) throw new Falha("Este comentário não está na fila de resposta.", 409);
-      if (!c.pode_responder) throw new Falha("O YouTube não deixa responder este comentário.", 409);
+      podeGanharResposta();
 
       const config = await carregarConfig(c.cliente_id);
       const inicioDoDia = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -95,7 +107,7 @@ Deno.serve(async (req) => {
       // trava: só um "publicar" passa
       const { data: travou } = await admin.from("yt_comentarios").update({
         resposta: "publicando", rascunho: texto, rascunho_editado: c.rascunho_editado || texto !== (c.rascunho ?? "").trim(), resposta_msg: null,
-      }).eq("id", c.id).in("resposta", ["rascunho", "falhou"]).select("id");
+      }).eq("id", c.id).in("resposta", ESTADOS_RESPONDIVEIS).select("id");
       if (!travou?.length) throw new Falha("Esta resposta já está sendo publicada.", 409);
 
       try {
@@ -131,16 +143,23 @@ Deno.serve(async (req) => {
       }
     }
 
+    // refazer (fila) e "Responder com IA" (busca, 15/11/26): a IA escreve a
+    // sugestão; ela vai para a fila e volta para a tela. Nada é publicado.
     if (p.acao === "refazer") {
-      if (["publicada", "publicando"].includes(c.resposta)) throw new Falha("Esta resposta já foi publicada.", 409);
-      if (c.rascunho_editado && !p.sobrescrever) {
+      podeGanharResposta();
+      if (c.ja_respondido) throw new Falha("Você já respondeu este comentário direto no YouTube.", 409);
+      if (c.rascunho_editado && c.rascunho && !p.sobrescrever) {
         throw new Falha("Você editou esta resposta. Confirme que quer trocar o seu texto pela nova sugestão da IA.", 409);
       }
-      if (!c.lead_id) throw new Falha("Este comentário não virou lead; não há resposta a sugerir.", 409);
       const config = await carregarConfig(c.cliente_id);
       const itens = await paraRedigir({ clienteId: c.cliente_id, ids: [c.id], limite: 1 });
       const r = await gravarRedacao(itens, await redigir(c.cliente_id, itens, config, (p.instrucao ?? "").slice(0, 500) || undefined));
-      return responder({ ok: true, mensagem: r.ok ? "Nova sugestão pronta." : "A IA escreveu, mas há um problema na sugestão (veja o motivo)." });
+      if (r.pulados) throw new Falha("O comentário mudou enquanto a IA escrevia (foi publicado ou está sendo). Atualize a página.", 409);
+      const { data: novo } = await admin.from("yt_comentarios").select("rascunho, resposta_msg, video_sugerido").eq("id", c.id).maybeSingle();
+      return responder({
+        ok: true, mensagem: r.ok ? "Nova sugestão pronta." : "A IA escreveu, mas há um problema na sugestão (veja o motivo).",
+        texto: novo?.rascunho ?? "", problema: novo?.resposta_msg ?? null, video_sugerido: novo?.video_sugerido ?? null,
+      });
     }
 
     throw new Falha("Ação desconhecida.", 400);

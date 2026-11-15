@@ -147,3 +147,25 @@ export function editouDeVerdade(sugestao: string | null | undefined, publicado: 
   const norma = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   return norma(sugestao) !== norma(publicado);
 }
+
+// Revisão mais rápida (David, 14/11/26): publicar sem a pergunta de
+// confirmação é escolha de quem revisa, guardada só neste navegador. Vale na
+// fila e na busca.
+export const CHAVE_SEM_CONFIRMAR = "dashmed:youtube:publicar-sem-confirmar";
+
+/** Comentário de quem pediu para apagar os dados (LGPD): a 0018 troca o texto
+ *  por esta marca e tira o canal do autor. Não recebe resposta. */
+export const foiAnonimizado = (texto: string) => texto.startsWith("[comentário anonimizado");
+
+/** Ordem da fila de respostas (David, 15/11/26: "ordenar por porcentagem de
+ *  consulta, porcentagem de cirurgia e parte socioeconômica ... mais recente
+ *  ou menos recente"). A primeira é a de sempre. */
+export const ORDENS_FILA = [
+  { id: "", rotulo: "Urgentes e maior chance primeiro" },
+  { id: "recentes", rotulo: "Mais recentes primeiro" },
+  { id: "antigos", rotulo: "Mais antigos primeiro" },
+  { id: "consulta", rotulo: "Maior % de consulta" },
+  { id: "cirurgia", rotulo: "Maior % de cirurgia" },
+  { id: "socio", rotulo: "Maior socioeconômica" },
+] as const;
+export type OrdemFila = (typeof ORDENS_FILA)[number]["id"];

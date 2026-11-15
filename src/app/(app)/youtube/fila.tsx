@@ -9,16 +9,13 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, GraduationCap, ListChecks, LoaderCircle, Send, Siren, Sparkles } from "lucide-react";
 import { dataHora } from "@/lib/conteudo";
 import { chamarFuncao } from "@/lib/funcoes";
-import { type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
+import { CHAVE_SEM_CONFIRMAR, type Comentario, editouDeVerdade, LINK_VIDEO, ROTULO_CATEGORIA } from "@/lib/youtube";
 import { ignorarResposta, salvarRascunho } from "./acoes";
 import Porcentagens from "./porcentagens";
 import JanelaTreino from "./treino";
 
 type Conversa = { comentario: string; resposta: string | null };
 
-// Revisão mais rápida (David, 14/11/26): publicar sem a pergunta de
-// confirmação é escolha de quem revisa, guardada só neste navegador.
-const CHAVE_SEM_CONFIRMAR = "dashmed:youtube:publicar-sem-confirmar";
 // No lote, uma por vez e com folga entre elas: rajada de respostas é o que o
 // filtro de spam do YouTube procura. O limite diário continua valendo no servidor.
 const INTERVALO_LOTE_MS = 4000;

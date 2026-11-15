@@ -4,9 +4,17 @@
 import Link from "next/link";
 import { X } from "lucide-react";
 import { etiquetasDoFiltro, type FiltroBusca, hrefBusca, POR_PAGINA, regexDeRealce, type ResumoYoutube, semCriterio } from "@/lib/busca-youtube";
-import { ROTULO_CATEGORIA } from "@/lib/youtube";
+import { ORDENS_FILA, ROTULO_CATEGORIA } from "@/lib/youtube";
 import { BotaoBuscarNoYoutube } from "./busca";
-import ListaComentarios, { type ItemComentario } from "./lista-comentarios";
+import ListaComentarios, { type AcoesLista, type ItemComentario } from "./lista-comentarios";
+import Ordenar from "./ordenar";
+
+// as ordens que o banco sabe fazer (buscar_comentarios, 0020); "recentes" é a de sempre
+const ORDENS_BUSCA = [
+  ...ORDENS_FILA.filter((o) => o.id).map((o) => ({ id: o.id as string, rotulo: o.rotulo as string })),
+  { id: "probabilidade", rotulo: "Maior chance de virar paciente" },
+  { id: "curtidas", rotulo: "Mais curtidos primeiro" },
+];
 
 /** O que a busca direto no YouTube fez, ou por que não fez (regra 2). */
 function NoYoutube({ yt, clienteId, q, filtro, obs }: { yt: ResumoYoutube | null; clienteId: string; q: string | null; filtro: FiltroBusca; obs: string | null }) {
@@ -50,9 +58,15 @@ function NoYoutube({ yt, clienteId, q, filtro, obs }: { yt: ResumoYoutube | null
 
 export default function ResultadosBusca(p: {
   clienteId: string; q: string | null; obs: string | null; filtro: FiltroBusca; total: number; itens: ItemComentario[]; pagina: number;
-  titulos: Record<string, string>; faltamPorcentagens: number; videoSemComentario: boolean; yt: ResumoYoutube | null;
+  titulos: Record<string, string>; faltamPorcentagens: number; videoSemComentario: boolean; yt: ResumoYoutube | null; acoes: AcoesLista;
 }) {
-  const etiquetas = etiquetasDoFiltro(p.filtro, { videos: p.titulos, categorias: ROTULO_CATEGORIA });
+  // a ordem tem o seletor próprio; as etiquetas ficam só para os critérios
+  const etiquetas = etiquetasDoFiltro(p.filtro, { videos: p.titulos, categorias: ROTULO_CATEGORIA }).filter((e) => e.chave !== "ordem");
+  const ordens = ORDENS_BUSCA.map((o) => ({
+    ...o,
+    // mudar a ordem não muda os critérios: o que veio do YouTube continua valendo
+    href: hrefBusca({ q: p.q, filtro: { ...p.filtro, ordem: o.id === "recentes" ? undefined : o.id }, obs: p.obs, yt: p.yt }),
+  }));
   const paginas = Math.max(1, Math.ceil(p.total / POR_PAGINA));
   const primeiro = p.total ? (p.pagina - 1) * POR_PAGINA + 1 : 0;
   const ultimo = Math.min(p.total, p.pagina * POR_PAGINA);
@@ -84,16 +98,19 @@ export default function ResultadosBusca(p: {
         <NoYoutube yt={p.yt} clienteId={p.clienteId} q={p.q} filtro={p.filtro} obs={p.obs} />
         {p.faltamPorcentagens > 0 && (
           <p className="text-xs text-zinc-600">
-            {p.faltamPorcentagens} comentário(s) antigo(s) ainda não têm as porcentagens (a varredura calcula aos poucos) e ficam de fora dos critérios de consulta, cirurgia e socioeconômica.
+            {p.faltamPorcentagens} comentário(s) antigo(s) ainda não têm as porcentagens (a varredura calcula aos poucos) e ficam de fora dos critérios de consulta, cirurgia e socioeconômica (e no fim, quando a ordem é por elas).
           </p>
         )}
       </div>
 
-      <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
-        <b>{p.total === 0 ? "Nenhum comentário encontrado" : `${p.total} comentário(s) encontrado(s)`}</b>
-        {p.total > POR_PAGINA && <span className="text-xs text-zinc-500">Mostrando {primeiro}–{ultimo}</span>}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span>
+          <b>{p.total === 0 ? "Nenhum comentário encontrado" : `${p.total} comentário(s) encontrado(s)`}</b>
+          {p.total > POR_PAGINA && <span className="ml-2 text-xs text-zinc-500">Mostrando {primeiro}–{ultimo}</span>}
+        </span>
+        {p.total > 1 && <Ordenar id="ordem-busca" valor={p.filtro.ordem ?? "recentes"} opcoes={ordens} />}
       </div>
-      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} vazio={!p.videoSemComentario
+      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} acoes={p.acoes} vazio={!p.videoSemComentario
         ? "Tire um critério (no × da etiqueta) ou escreva a busca de outro jeito."
         : p.yt && !("erro" in p.yt)
           ? "Este vídeo não tem comentário, nem no YouTube nem no DashMed. Se foi uma live, a conversa ao vivo fica no chat, não nos comentários. Se você queria outro vídeo, diga qual (ex.: “Quarta do Quadril #223”)."

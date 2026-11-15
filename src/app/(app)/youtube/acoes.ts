@@ -35,14 +35,17 @@ export async function voltarParaFila(id: string): Promise<Resultado> {
   return { ok: true, msg: "Voltou para a fila." };
 }
 
-/** Texto editado pelo médico: a IA não troca sem ele confirmar (regra 4). */
+/** Texto editado pelo médico: a IA não troca sem ele confirmar (regra 4).
+ *  Da busca (15/11/26) o comentário pode estar fora da fila: salvar põe na
+ *  fila. Publicado ou sendo publicado não muda; anonimizado (LGPD) também não. */
 export async function salvarRascunho(id: string, texto: string): Promise<Resultado> {
   const t = texto.trim();
   if (t.length < 2) return { ok: false, msg: "A resposta está vazia." };
   if (t.length > 2000) return { ok: false, msg: "Resposta longa demais (até 2.000 caracteres)." };
   const supabase = await supabaseServidor();
   const { data, error } = await supabase.from("yt_comentarios").update({ rascunho: t, rascunho_editado: true, resposta: "rascunho" })
-    .eq("id", id).in("resposta", ["rascunho", "falhou"]).select("id");
+    .eq("id", id).in("resposta", ["nenhuma", "redigir", "rascunho", "falhou", "ignorada"])
+    .eq("pode_responder", true).not("texto", "like", "[comentário anonimizado%").select("id");
   const f = falha(error, data);
   if (f) return f;
   return { ok: true, msg: "Rascunho salvo." };
