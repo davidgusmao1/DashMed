@@ -169,10 +169,18 @@ export default async function YoutubeSeller({ searchParams }: { searchParams: Pr
           : Promise.resolve({ count: 0 }),
       ]);
       const res = (data ?? null) as { total: number; itens: ItemComentario[] } | null;
+      // nada achado num vídeo: diz se é porque o vídeo ainda não tem comentário lido (regra 2)
+      let videoSemComentario = false;
+      if (res && res.total === 0 && filtro.videos?.length) {
+        const { count } = await supabase.from("yt_comentarios").select("id", { count: "exact", head: true })
+          .eq("cliente_id", emFoco.id).in("video_id", filtro.videos).is("deleted_at", null);
+        videoSemComentario = (count ?? 0) === 0;
+      }
       conteudo = error || !res
         ? <p className="cartao p-5 text-sm text-zinc-900">Não consegui buscar: {error?.message ?? "sem resposta do banco"}.</p>
         : <ResultadosBusca q={frase ?? null} obs={obs ?? null} filtro={filtro} total={res.total} itens={res.itens} pagina={pagina}
-            titulos={Object.fromEntries((vids ?? []).map((v) => [v.video_id, v.titulo as string]))} faltamPorcentagens={faltam.count ?? 0} />;
+            titulos={Object.fromEntries((vids ?? []).map((v) => [v.video_id, v.titulo as string]))} faltamPorcentagens={faltam.count ?? 0}
+            videoSemComentario={videoSemComentario} />;
     }
   } else {
     const { data } = await supabase.from("yt_comentarios")

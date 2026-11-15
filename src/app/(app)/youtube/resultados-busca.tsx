@@ -9,7 +9,7 @@ import ListaComentarios, { type ItemComentario } from "./lista-comentarios";
 
 export default function ResultadosBusca(p: {
   q: string | null; obs: string | null; filtro: FiltroBusca; total: number; itens: ItemComentario[]; pagina: number;
-  titulos: Record<string, string>; faltamPorcentagens: number;
+  titulos: Record<string, string>; faltamPorcentagens: number; videoSemComentario: boolean;
 }) {
   const etiquetas = etiquetasDoFiltro(p.filtro, { videos: p.titulos, categorias: ROTULO_CATEGORIA });
   const paginas = Math.max(1, Math.ceil(p.total / POR_PAGINA));
@@ -51,7 +51,9 @@ export default function ResultadosBusca(p: {
         <b>{p.total === 0 ? "Nenhum comentário encontrado" : `${p.total} comentário(s) encontrado(s)`}</b>
         {p.total > POR_PAGINA && <span className="text-xs text-zinc-500">Mostrando {primeiro}–{ultimo}</span>}
       </div>
-      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} vazio="Tire um critério (no × da etiqueta) ou escreva a busca de outro jeito." />
+      <ListaComentarios itens={p.itens} realce={regexDeRealce(p.filtro)} vazio={p.videoSemComentario
+        ? "A varredura ainda não leu nenhum comentário deste vídeo. Se ele é novo, rode a varredura; se foi uma live, a conversa ao vivo fica no chat, não nos comentários. Se você queria outro vídeo, diga qual (ex.: “Quarta do Quadril #223”)."
+        : "Tire um critério (no × da etiqueta) ou escreva a busca de outro jeito."} />
       {paginas > 1 && (
         <div className="flex items-center justify-between text-sm">
           {p.pagina > 1 ? <Link className="botao-claro" href={hrefBusca({ q: p.q, filtro: p.filtro, obs: p.obs, pagina: p.pagina - 1 })}>← Anteriores</Link> : <span />}
